@@ -7,6 +7,11 @@
 //
 // `explode` is how far the part travels, in meters, when the car is fully exploded,
 // in car space: +x toward the front, +y up, +z toward the car's right side.
+//
+// `interior` parts stay in place and stay selectable in the interior view, which
+// moves every other part out of the way. `view` is the horizontal direction the
+// camera looks at a part from, when the default (the way it explodes) is wrong:
+// cockpit parts are seen from the seats.
 const wheel = (front, side) => ({
   name: `${front ? 'Front' : 'Rear'} ${side === 1 ? 'right' : 'left'} wheel & tire`,
   bullets: front
@@ -72,13 +77,13 @@ export const PARTS = {
     name: 'Left door',
     bullets: ['Aluminum door skin', 'Frameless side window', 'Includes exterior mirror and door card'],
     explode: [0, 0.15, -1.1],
-    shop: { query: 'Porsche 992 carbon door', match: /\bdoors?\b/i, exclude: /sill|trim|armrest|strap/i },
+    shop: { query: 'Porsche 992 carbon door', match: /\bdoors?\b/i, exclude: /sill|trim|armrest|strap|mats?\b/i },
   },
   door_r: {
     name: 'Right door',
     bullets: ['Aluminum door skin', 'Frameless side window', 'Includes exterior mirror and door card'],
     explode: [0, 0.15, 1.1],
-    shop: { query: 'Porsche 992 carbon door', match: /\bdoors?\b/i, exclude: /sill|trim|armrest|strap/i },
+    shop: { query: 'Porsche 992 carbon door', match: /\bdoors?\b/i, exclude: /sill|trim|armrest|strap|mats?\b/i },
   },
   fender_l: {
     name: 'Left front fender',
@@ -129,34 +134,64 @@ export const PARTS = {
     shop: { query: 'Porsche 992 Turbo S exhaust tips', match: /tips?\b|tailpipes?|exhaust/i },
   },
   dashboard: {
+    interior: true,
+    view: [-1, 0, 0.35],
     name: 'Dashboard & center console',
     bullets: ['Analog center tachometer flanked by 7-inch displays', '10.9-inch PCM touchscreen', 'Short PDK selector lever'],
     explode: [0.5, 1.1, 0],
     shop: { query: 'Porsche 992 dashboard interior trim', match: /dash|console/i },
   },
   steering_wheel: {
+    interior: true,
+    view: [-1, 0, 0.35],
     name: 'Steering wheel',
     bullets: ['GT sport steering wheel', 'Paddle shifters for the 8-speed PDK', 'Drive mode switch'],
     explode: [0.3, 1.35, 0],
     shop: { query: 'Porsche 992 steering wheel', match: /steering wheel/i },
   },
   seat_l: {
+    interior: true,
     name: 'Driver seat',
     bullets: ['18-way Adaptive Sports Seats Plus', 'Memory and heated settings', 'Perforated leather center panels'],
     explode: [0, 1.0, -0.35],
-    shop: { query: 'Porsche 992 sports seat', match: /\bseats?\b/i, exclude: /extinguisher|base|bracket|insert|adjuster/i },
+    shop: { query: 'Porsche 992 sports seat', match: /\bseats?\b/i, exclude: /extinguisher|base|bracket|insert|adjuster|protector|cushion/i },
   },
   seat_r: {
+    interior: true,
     name: 'Passenger seat',
     bullets: ['18-way Adaptive Sports Seats Plus', 'Heated, power adjustable', 'Perforated leather center panels'],
     explode: [0, 1.0, 0.35],
-    shop: { query: 'Porsche 992 sports seat', match: /\bseats?\b/i, exclude: /extinguisher|base|bracket|insert|adjuster/i },
+    shop: { query: 'Porsche 992 sports seat', match: /\bseats?\b/i, exclude: /extinguisher|base|bracket|insert|adjuster|protector|cushion/i },
   },
   rear_seats: {
+    interior: true,
     name: 'Rear seats',
     bullets: ['2+2 occasional seating', 'Fold-down backrests for extra storage'],
     explode: [-0.4, 1.05, 0],
     shop: { query: 'Porsche 992 rear seat', match: /rear seats?|seat delete/i },
+  },
+  shifter: {
+    interior: true,
+    view: [-1, 0, 0.35],
+    name: 'PDK gear selector',
+    bullets: ['Compact shift-by-wire selector', 'Controls the 8-speed PDK transmission', 'P, R, N and D on a short toggle'],
+    explode: [0.15, 1.3, 0],
+    shop: { query: 'Porsche 992 PDK gear selector shifter', match: /shift|selector|gear/i },
+  },
+  center_console: {
+    interior: true,
+    view: [-1, 0, 0.35],
+    name: 'Center console & armrest',
+    bullets: ['Leather-trimmed armrest with storage', 'Cup holders and USB-C ports', 'Runs between the front seats'],
+    explode: [-0.2, 1.2, 0],
+    shop: { query: 'Porsche 992 center console armrest', match: /console|armrest/i },
+  },
+  carpet: {
+    interior: true,
+    name: 'Carpet & floor mats',
+    bullets: ['Velour floor carpet', 'Fitted floor mats with Porsche lettering', 'Covers the front and rear footwells'],
+    explode: [0, -0.4, 0],
+    shop: { query: 'Porsche 992 floor mats', match: /floor mats?|carpet/i },
   },
   wheel_fl: wheel(true, -1),
   wheel_fr: wheel(true, 1),

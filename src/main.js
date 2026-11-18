@@ -8,6 +8,13 @@ import { Callout } from './callout.js';
 import SHOP_LINKS from './shop-links.json';
 
 const POP_DISTANCE = 0.35; // how far a selected part slides out, in meters
+// Porsche Chalk, a light neutral grey; darker than the real swatch because the studio
+// lighting and tone mapping brighten it.
+const CHALK = new THREE.Color('#7f817e');
+// In the interior view every exterior part flies this far out along its explode
+// direction and fades away, and the body shell fades to a ghost of itself.
+const AWAY_DISTANCE = 3.5;
+const GHOST_OPACITY = 0.1;
 // Emissive tints are linear and add to every material, so keep them faint.
 const HOVER_COLOR = new THREE.Color(0x3b82f6).multiplyScalar(0.015);
 const SELECT_COLOR = new THREE.Color(0x3b82f6).multiplyScalar(0.03);
@@ -25,12 +32,14 @@ scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnviron
 
 const camera = new THREE.PerspectiveCamera(35, 1, 0.05, 100);
 const HOME = { position: new THREE.Vector3(5.6, 2.6, 6.2), target: new THREE.Vector3(0, 0.55, 0) };
+// Looking down into the cabin over the right front fender.
+const INTERIOR_HOME = { position: new THREE.Vector3(2.3, 2.7, 2.1), target: new THREE.Vector3(-0.1, 0.45, 0) };
 camera.position.copy(HOME.position);
 
 const controls = new OrbitControls(camera, canvas);
 controls.target.copy(HOME.target);
 controls.enableDamping = true;
-controls.minDistance = 2.5;
+controls.minDistance = 1.2;
 controls.maxDistance = 16;
 controls.maxPolarAngle = Math.PI * 0.49;
 
@@ -57,10 +66,50 @@ let selected = null;
 let callout = null;
 let carTop = 1.3;
 let visibleAspect = 1; // aspect of the canvas area not covered by the parts panel
+// The camera glides to `cameraGoal` when it is set, then hands control back.
+let cameraGoal = null;
+let inside = 0; // 0 = whole car, 1 = interior view
+let insideTarget = 0;
 
 const explodeBtn = document.getElementById('explode-btn');
 const explodeRange = document.getElementById('explode-range');
 const partList = document.getElementById('part-list');
+const interiorBtn = document.getElementById('interior-btn');
+
+const home = () => (insideTarget > 0.5 ? INTERIOR_HOME : HOME);
+// Labels float over the roofline, or just over the seats once the roof is gone.
+const labelFloor = () => (insideTarget > 0.5 ? 1.35 : carTop + 0.35);
+// Interior parts are small, so their labels are too.
+const labelSize = () => (insideTarget > 0.5 ? 0.5 : 1);
+// Inside, the camera looks down, so a label just beyond the part shows above it.
+const labelReach = () => (insideTarget > 0.5 ? -0.8 : 0.7);
+// Parts that can be clicked: in the interior view, only the interior ones.
+const pickable = (part) => (insideTarget > 0.5 ? part.interior : true);
+
+function setInterior(on) {
+  select(null);
+  insideTarget = on ? 1 : 0;
+  interiorBtn.textContent = on ? 'Exterior' : 'Interior';
+  interiorBtn.setAttribute('aria-pressed', String(on));
+  for (const li of partList.children) li.hidden = on && !PARTS[li.dataset.id].interior;
+  cameraGoal = { position: home().position.clone(), target: home().target.clone() };
+}
+
+// Fades a part's materials; 1 is its normal look. Transparency only turns on
+// while the part is partly faded, so the assembled car renders as before.
+function fade(part, amount) {
+  if (amount === part.fade) return;
+  part.fade = amount;
+  part.object.visible = amount > 0.01;
+  for (const m of part.materials) {
+    const transparent = m.transparent || amount < 0.999;
+    if (m.material.transparent !== transparent) m.material.needsUpdate = true;
+    m.material.transparent = transparent;
+    m.material.opacity = m.opacity * amount;
+    m.material.depthWrite = m.depthWrite && amount >= 0.999;
+  }
+  part.object.traverse((o) => o.isMesh && (o.castShadow = amount > 0.5));
+}
 
 function setExplodeTarget(value) {
   explodeTarget = value;
@@ -83,9 +132,10 @@ function select(part, localAnchor) {
     // Put the orbit pivot back on the car and pull out to the whole-car distance,
     // keeping the current viewing angle.
     if (previous) {
-      const home = HOME.position.distanceTo(HOME.target) * (explodeTarget > 0.5 ? 1.4 : 1);
+      const { position, target } = home();
+      const distance = position.distanceTo(target) * (explodeTarget > 0.5 ? 1.4 : 1);
       const dir = camera.position.clone().sub(controls.target).normalize();
-      cameraGoal = { position: HOME.target.clone().addScaledVector(dir, home), target: HOME.target.clone() };
+      cameraGoal = { position: target.clone().addScaledVector(dir, distance), target: target.clone() };
     }
     return;
   }
@@ -101,7 +151,9 @@ function select(part, localAnchor) {
   const camSide = camera.position.clone().sub(controls.target).setY(0).normalize();
   const slide = part.offset.lengthSq() > 0 ? part.offset.clone() : partCenter.clone();
   slide.setY(0);
-  const side = (slide.length() > 0.2 ? slide.normalize() : camSide.clone()).addScaledVector(camSide, 0.35).normalize();
+  const side = PARTS[part.id].view
+    ? new THREE.Vector3(...PARTS[part.id].view).normalize()
+    : (slide.length() > 0.2 ? slide.normalize() : camSide.clone()).addScaledVector(camSide, 0.35).normalize();
 
   // The label faces that side, snapped to the car's axes so it reads like a page
   // pinned to the car.
@@ -110,7 +162,8 @@ function select(part, localAnchor) {
     : new THREE.Vector3(0, 0, Math.sign(side.z));
   // A low eye line keeps the label, which floats over the roofline, against the
   // background instead of over the car.
-  const direction = side.clone().setY(0.22).normalize();
+  // Inside the cabin the camera looks down over the seats instead.
+  const direction = side.clone().setY(insideTarget > 0.5 ? 0.9 : 0.22).normalize();
 
   // The label text runs away from the car's center (the origin) when the part is
   // off to one side, otherwise toward the right of the screen.
@@ -122,7 +175,10 @@ function select(part, localAnchor) {
   callout = new Callout(PARTS[part.id], part.object, localAnchor ?? part.center, {
     outward,
     textDir,
-    minY: carTop + 0.35,
+    minY: labelFloor(),
+    size: labelSize(),
+    tilt: insideTarget > 0.5 ? 0.7 : 0,
+    reach: labelReach(),
     listings: SHOP_LINKS[part.id] ?? [],
   });
   scene.add(callout.group);
@@ -130,10 +186,11 @@ function select(part, localAnchor) {
   // Frame the part together with its label: Callout puts the label's bottom edge
   // 0.7 m out and above the part (at least over the roofline), with the label
   // running 1.5 m along textDir and callout.height up from there.
-  const labelAt = partCenter.clone().addScaledVector(outward, 0.7);
-  labelAt.y = Math.max(labelAt.y + 0.5, carTop + 0.35);
+  const size = labelSize();
+  const labelAt = partCenter.clone().addScaledVector(outward, labelReach() * size);
+  labelAt.y = Math.max(labelAt.y + 0.5 * size, labelFloor());
   box.expandByPoint(labelAt)
-    .expandByPoint(labelAt.clone().addScaledVector(textDir, 1.5).setY(labelAt.y + callout.height));
+    .expandByPoint(labelAt.clone().addScaledVector(textDir, 1.5 * size).setY(labelAt.y + callout.height));
   const sphere = box.getBoundingSphere(new THREE.Sphere());
   const fov = THREE.MathUtils.degToRad(camera.fov) / 2;
   const fovX = Math.atan(Math.tan(fov) * visibleAspect);
@@ -186,7 +243,9 @@ loader.load(
         if (!o.isMesh) return;
         o.castShadow = true;
         o.material = o.material.clone();
-        materials.push({ material: o.material, emissive: o.material.emissive.clone() });
+        if (o.material.name === 'body_main') o.material.color.copy(CHALK);
+        const { emissive, opacity, transparent, depthWrite } = o.material;
+        materials.push({ material: o.material, emissive: emissive.clone(), opacity, transparent, depthWrite });
         o.userData.partId = id;
       });
       const box = new THREE.Box3().setFromObject(object); // world space, assembled
@@ -203,6 +262,9 @@ loader.load(
         offset,
         pop: pop.multiplyScalar(id === 'body' ? 0 : POP_DISTANCE),
         popAmount: 0,
+        interior: Boolean(PARTS[id].interior),
+        away: offset.clone().normalize().multiplyScalar(AWAY_DISTANCE),
+        fade: 1,
       });
     }
     parts.sort((a, b) => PARTS[a.id].name.localeCompare(PARTS[b.id].name));
@@ -227,7 +289,7 @@ function pick(event) {
   const rect = canvas.getBoundingClientRect();
   pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
-  const hit = raycaster.intersectObjects(parts.map((p) => p.object), true)[0];
+  const hit = raycaster.intersectObjects(parts.filter(pickable).map((p) => p.object), true)[0];
   if (!hit) return null;
   const part = parts.find((p) => p.id === hit.object.userData.partId);
   return { part, point: part.object.worldToLocal(hit.point.clone()) };
@@ -267,9 +329,6 @@ canvas.addEventListener('pointermove', (e) => {
   if (part) tint(part);
 });
 
-// The camera glides to `cameraGoal` when it is set, then hands control back.
-let cameraGoal = null;
-
 explodeBtn.addEventListener('click', () => {
   const exploding = explodeTarget <= 0.5;
   setExplodeTarget(exploding ? 1 : 0);
@@ -277,11 +336,11 @@ explodeBtn.addEventListener('click', () => {
   const offset = camera.position.clone().sub(controls.target).multiplyScalar(exploding ? 1.4 : 1 / 1.4);
   cameraGoal = { position: controls.target.clone().add(offset), target: controls.target.clone() };
 });
+interiorBtn.addEventListener('click', () => setInterior(insideTarget < 0.5));
 explodeRange.addEventListener('input', () => setExplodeTarget(Number(explodeRange.value)));
 document.getElementById('reset-btn').addEventListener('click', () => {
-  select(null);
   setExplodeTarget(0);
-  cameraGoal = { position: HOME.position.clone(), target: HOME.target.clone() };
+  setInterior(false);
 });
 controls.addEventListener('start', () => (cameraGoal = null));
 window.addEventListener('keydown', (e) => e.key === 'Escape' && select(null));
@@ -310,9 +369,15 @@ renderer.setAnimationLoop(() => {
   explode += (explodeTarget - explode) * k;
   if (document.activeElement !== explodeRange) explodeRange.value = explode.toFixed(2);
 
+  inside += (insideTarget - inside) * k;
+  if (Math.abs(insideTarget - inside) < 0.001) inside = insideTarget;
+
   for (const part of parts) {
     part.popAmount += ((part === selected ? 1 : 0) - part.popAmount) * k;
     part.object.position.copy(part.rest).addScaledVector(part.offset, explode).addScaledVector(part.pop, part.popAmount);
+    if (part.interior) continue;
+    part.object.position.addScaledVector(part.away, inside);
+    fade(part, part.id === 'body' ? 1 - (1 - GHOST_OPACITY) * inside : 1 - inside);
   }
 
   if (cameraGoal) {
@@ -331,6 +396,8 @@ renderer.setAnimationLoop(() => {
 window.viewer = {
   setExplode: (v) => { setExplodeTarget(v); explode = v; },
   select: (id) => select(parts.find((p) => p.id === id) ?? null),
+  interior: setInterior,
+  state: () => ({ inside: +inside.toFixed(3), explode: +explode.toFixed(3) }),
   view: (x, y, z) => camera.position.set(x, y, z),
   target: () => controls.target.toArray().map((v) => +v.toFixed(2)),
 };

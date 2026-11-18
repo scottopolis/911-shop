@@ -44,6 +44,7 @@ function classify({ node, door, c, s, max }) {
   if (/^discs|^brakes/.test(node)) return `brake_${corner(c)}`;
   if (/logo_all|metal_parts|black_metal/.test(node) && hubDist < 0.3 && az > 0.82 && max < 0.6) return `wheel_${corner(c)}`;
 
+  if (/^rugs/.test(node)) return 'carpet';
   if (/^pipes/.test(node)) return 'exhaust';
   if (/black_metal|metal_parts/.test(node) && x < -4.3 && y < 0.3 && az > 0.25 && az < 0.55 && max < 0.25) return 'exhaust';
 
@@ -67,7 +68,10 @@ function classify({ node, door, c, s, max }) {
   }
 
   if (INTERIOR.test(node) && Math.hypot(x - STEERING[0], y - STEERING[1], z - STEERING[2]) < 0.22 && max < 0.45) return 'steering_wheel';
+  // PDK selector and its trim, on the console between the seats.
+  if (INTERIOR.test(node) && x > -2.13 && x < -1.94 && az < 0.1 && y > 0.36 && y < 0.5 && max < 0.25) return 'shifter';
   if (SEAT.test(node) && x > -2.95 && x < -2.05 && az > 0.12 && az < 0.6 && y > 0.05 && y < 1.0 && max < 0.75) return `seat_${side}`;
+  if (INTERIOR.test(node) && x > -2.95 && x < -2.1 && az < 0.12 && y > 0.15 && y < 0.7 && max < 0.8) return 'center_console';
   if (SEAT.test(node) && x > -3.65 && x < -2.95 && az < 0.6 && y > 0.1 && y < 0.95 && max < 1.0) return 'rear_seats';
   if (INTERIOR.test(node) && x > -2.15 && x < -1.25 && y > 0.35 && az < 0.75 && max < 1.6) return 'dashboard';
 

@@ -125,7 +125,14 @@ export class Callout {
   // space, that the label faces and is pushed toward. The label's bottom edge
   // floats at least `minY` high, above the car, and its text runs along `textDir` (horizontal,
   // perpendicular to `outward`) from whichever side it is read.
-  constructor(info, part, localAnchor, { outward, textDir, minY, listings = [] }) {
+  // `size` scales the whole label, and how far it floats from the part.
+  // `tilt` leans the label back, in radians, to face a camera looking down on it.
+  // `reach` is how far, before scaling, the label sits out along `outward`; a
+  // negative reach puts it behind the part, as seen from the camera.
+  constructor(info, part, localAnchor, { outward, textDir, minY, listings = [], size = 1, tilt = 0, reach = 0.7 }) {
+    this.size = size;
+    this.reach = reach;
+    this.tilt = tilt;
     this.part = part;
     this.localAnchor = localAnchor.clone();
     this.outward = outward.clone();
@@ -146,8 +153,9 @@ export class Callout {
     );
     // The underline's left end sits on the pivot; the title above it, the rest below.
     plane.position.set(WIDTH / 2, underlineY - height / 2, 0);
-    this.height = height;
-    this.underlineY = underlineY;
+    this.height = height * size;
+    this.underlineY = underlineY * size;
+    this.pivot.scale.setScalar(size);
     plane.renderOrder = 10;
     this.plane = plane;
     this.pivot.add(plane);
@@ -172,12 +180,13 @@ export class Callout {
     this.dot.position.copy(this.anchor);
 
     // The label's bottom edge floats 0.5 m above the anchor and at least at minY.
-    const p = this.pivot.position.copy(this.anchor).addScaledVector(this.outward, 0.7);
-    p.y = Math.max(p.y + 0.5, this.minY) + this.height - this.underlineY;
+    const p = this.pivot.position.copy(this.anchor).addScaledVector(this.outward, this.reach * this.size);
+    p.y = Math.max(p.y + 0.5 * this.size, this.minY) + this.height - this.underlineY;
 
     const toCamera = camera.position.clone().sub(p);
     const facing = toCamera.dot(this.outward) >= 0 ? this.outward : this.outward.clone().negate();
     this.pivot.lookAt(p.clone().add(facing));
+    this.pivot.rotateX(-this.tilt);
 
     // Hang the text off the end of the underline that lies along textDir.
     const localX = new THREE.Vector3(1, 0, 0).applyQuaternion(this.pivot.quaternion);

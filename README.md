@@ -1,6 +1,6 @@
 # 911 Shop
 
-An interactive 3D parts explorer for the Porsche 911 Turbo S (992): orbit the car, explode its major parts, and click a part to see its name and details on a 3D callout.
+An interactive 3D parts explorer for the Porsche 911 Turbo S (992) in Chalk: orbit the car, explode its major parts, and click a part to see its name and details on a 3D callout. The Interior button moves the exterior out of the way so you can pick cabin parts such as the steering wheel, PDK selector, dashboard and seats.
 
 ```sh
 npm install

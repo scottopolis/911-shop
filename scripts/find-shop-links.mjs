@@ -14,7 +14,7 @@ const ENDPOINT = 'https://catalog.shopify.com/api/ucp/mcp';
 const PROFILE = 'https://shopify.dev/ucp/agent-profiles/examples/2026-08-25/valid-with-capabilities.json';
 const PER_PART = 3;
 // Listings that mention the part but are not the part itself.
-const ACCESSORY = /\b(mats?|decals?|stickers?|ppf|film|sun ?shade|tear-?offs?|wiper|brackets?|covers?|hinge|scharnier|kit - |lettering|banner|winter set|paint)\b/i;
+const ACCESSORY = /\b(decals?|stickers?|ppf|film|sun ?shade|tear-?offs?|wiper|brackets?|covers?|hinge|scharnier|kit - |lettering|banner|winter set|paint)\b/i;
 
 async function search(query, attempt = 0) {
   const res = await fetch(ENDPOINT, {
@@ -57,7 +57,8 @@ for (const [id, { shop }] of Object.entries(PARTS)) {
     const { title } = product;
     // Every listing must name the 992 generation, so it fits this car.
     if (!/992/.test(title) || !shop.match.test(title) || shop.exclude?.test(title) || ACCESSORY.test(title)) continue;
-    const key = `${v.seller?.name}|${product.title.replace(/\b20\d\d\b/g, '')}`;
+    // One listing per store, so each part shows a choice of sellers.
+    const key = v.seller?.name ?? new URL(v.url).hostname;
     if (seen.has(key)) continue;
     seen.add(key);
     links[id].push({
