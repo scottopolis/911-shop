@@ -101,12 +101,16 @@ function fade(part, amount) {
   if (amount === part.fade) return;
   part.fade = amount;
   part.object.visible = amount > 0.01;
+  // The last bit of a fade is too faint to see, so the part turns solid early.
+  const shown = amount >= 0.98 ? 1 : amount;
   for (const m of part.materials) {
-    const transparent = m.transparent || amount < 0.999;
+    const transparent = m.transparent || shown < 1;
     if (m.material.transparent !== transparent) m.material.needsUpdate = true;
     m.material.transparent = transparent;
-    m.material.opacity = m.opacity * amount;
-    m.material.depthWrite = m.depthWrite && amount >= 0.999;
+    m.material.opacity = m.opacity * shown;
+    // A mostly solid part still writes depth, so parts drawn after it, such as
+    // a wheel inside its arch, cannot paint over it.
+    m.material.depthWrite = m.depthWrite && shown > 0.5;
   }
   part.object.traverse((o) => o.isMesh && (o.castShadow = amount > 0.5));
 }

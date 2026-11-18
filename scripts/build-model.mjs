@@ -73,6 +73,12 @@ function classify({ node, door, c, s, max }) {
   if (SEAT.test(node) && x > -2.95 && x < -2.05 && az > 0.12 && az < 0.6 && y > 0.05 && y < 1.0 && max < 0.75) return `seat_${side}`;
   if (INTERIOR.test(node) && x > -2.95 && x < -2.1 && az < 0.12 && y > 0.15 && y < 0.7 && max < 0.8) return 'center_console';
   if (SEAT.test(node) && x > -3.65 && x < -2.95 && az < 0.6 && y > 0.1 && y < 0.95 && max < 1.0) return 'rear_seats';
+  // Pieces of the dashboard that are their own parts; the rest stays in "dashboard".
+  if (INTERIOR.test(node) && x > -2.25 && x < -1.85 && y > 0.93 && az < 0.25 && max < 0.35) return 'overhead_console';
+  if (INTERIOR.test(node) && x > -1.7 && x < -1.55 && y > 0.74 && az < 0.06 && max < 0.1) return 'sport_chrono';
+  if (INTERIOR.test(node) && x > -1.92 && x < -1.74 && y > 0.58 && y < 0.82 && z > -0.54 && z < -0.02 && max < 0.3) return 'instrument_cluster';
+  if (INTERIOR.test(node) && x > -1.96 && x < -1.72 && y > 0.38 && y < 0.58 && az < 0.14 && max < 0.3) return 'center_stack';
+  if (/^plast_leather/.test(node) && x > -1.9 && x < -1.65 && y < 0.6 && z > 0.15 && max < 0.55) return 'glovebox';
   if (INTERIOR.test(node) && x > -2.15 && x < -1.25 && y > 0.35 && az < 0.75 && max < 1.6) return 'dashboard';
 
   return 'body';
