@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Porsche 911 Carrera 4S (992) — Parts Explorer</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+
+    <header class="brand">
+      <h1>911 Carrera 4S</h1>
+      <p>Type 992 · Parts explorer</p>
+    </header>
+
+    <aside class="parts">
+      <h2>Parts</h2>
+      <ul id="part-list"></ul>
+    </aside>
+
+    <div class="controls">
+      <button id="explode-btn" type="button">Explode</button>
+      <label class="slider">
+        <span>Assembled</span>
+        <input id="explode-range" type="range" min="0" max="1" step="0.01" value="0" aria-label="Explode amount" />
+        <span>Exploded</span>
+      </label>
+      <button id="reset-btn" type="button" class="ghost">Reset view</button>
+    </div>
+
+    <p class="hint">Drag to orbit · Scroll to zoom · Click a part for details</p>
+
+    <div id="loading" class="loading"><span id="loading-text">Loading model…</span></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
