@@ -5,6 +5,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { PARTS } from './parts.js';
 import { Callout } from './callout.js';
+import SHOP_LINKS from './shop-links.json';
 
 const POP_DISTANCE = 0.35; // how far a selected part slides out, in meters
 // Emissive tints are linear and add to every material, so keep them faint.
@@ -55,6 +56,7 @@ let hovered = null;
 let selected = null;
 let callout = null;
 let carTop = 1.3;
+let visibleAspect = 1; // aspect of the canvas area not covered by the parts panel
 
 const explodeBtn = document.getElementById('explode-btn');
 const explodeRange = document.getElementById('explode-range');
@@ -77,21 +79,73 @@ function select(part, localAnchor) {
   callout?.dispose();
   callout = null;
   for (const btn of partList.children) btn.firstChild.setAttribute('aria-pressed', String(btn.dataset.id === part?.id));
-  if (!part) return;
+  if (!part) {
+    // Put the orbit pivot back on the car and pull out to the whole-car distance,
+    // keeping the current viewing angle.
+    if (previous) {
+      const home = HOME.position.distanceTo(HOME.target) * (explodeTarget > 0.5 ? 1.4 : 1);
+      const dir = camera.position.clone().sub(controls.target).normalize();
+      cameraGoal = { position: HOME.target.clone().addScaledVector(dir, home), target: HOME.target.clone() };
+    }
+    return;
+  }
   tint(part);
 
-  // Face the label toward whichever side of the car the camera is on, snapped to
-  // the car's axes so it reads like a page pinned to the car.
-  const view = camera.position.clone().sub(controls.target).setY(0);
-  const outward = Math.abs(view.x) > Math.abs(view.z)
-    ? new THREE.Vector3(Math.sign(view.x), 0, 0)
-    : new THREE.Vector3(0, 0, Math.sign(view.z));
+  // Where the part comes to rest once its explode and pop-out animations finish.
+  const box = part.box.clone().translate(part.offset.clone().multiplyScalar(explodeTarget).add(part.pop));
+  const partCenter = box.getCenter(new THREE.Vector3());
+
+  // Look at the part from the side it slides out toward, turned a little toward
+  // where the camera already is so the view keeps some depth. Parts that slide
+  // straight up (roof, seats) are seen from the side the camera is on.
+  const camSide = camera.position.clone().sub(controls.target).setY(0).normalize();
+  const slide = part.offset.lengthSq() > 0 ? part.offset.clone() : partCenter.clone();
+  slide.setY(0);
+  const side = (slide.length() > 0.2 ? slide.normalize() : camSide.clone()).addScaledVector(camSide, 0.35).normalize();
+
+  // The label faces that side, snapped to the car's axes so it reads like a page
+  // pinned to the car.
+  const outward = Math.abs(side.x) > Math.abs(side.z)
+    ? new THREE.Vector3(Math.sign(side.x), 0, 0)
+    : new THREE.Vector3(0, 0, Math.sign(side.z));
+  // A low eye line keeps the label, which floats over the roofline, against the
+  // background instead of over the car.
+  const direction = side.clone().setY(0.22).normalize();
+
+  // The label text runs away from the car's center (the origin) when the part is
+  // off to one side, otherwise toward the right of the screen.
+  const textDir = new THREE.Vector3(0, 1, 0).cross(outward);
+  const lateral = textDir.dot(partCenter);
+  const screenRight = direction.clone().negate().cross(new THREE.Vector3(0, 1, 0));
+  if (Math.abs(lateral) > 0.3 ? lateral < 0 : textDir.dot(screenRight) < 0) textDir.negate();
+
   callout = new Callout(PARTS[part.id], part.object, localAnchor ?? part.center, {
     outward,
-    center: new THREE.Vector3(0, 0, 0), // the car is centered on the origin at load
+    textDir,
     minY: carTop + 0.35,
+    listings: SHOP_LINKS[part.id] ?? [],
   });
   scene.add(callout.group);
+
+  // Frame the part together with its label: Callout puts the label's bottom edge
+  // 0.7 m out and above the part (at least over the roofline), with the label
+  // running 1.5 m along textDir and callout.height up from there.
+  const labelAt = partCenter.clone().addScaledVector(outward, 0.7);
+  labelAt.y = Math.max(labelAt.y + 0.5, carTop + 0.35);
+  box.expandByPoint(labelAt)
+    .expandByPoint(labelAt.clone().addScaledVector(textDir, 1.5).setY(labelAt.y + callout.height));
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  const fov = THREE.MathUtils.degToRad(camera.fov) / 2;
+  const fovX = Math.atan(Math.tan(fov) * visibleAspect);
+  const distance = THREE.MathUtils.clamp(
+    (sphere.radius / Math.sin(Math.min(fov, fovX))) * 1.05,
+    controls.minDistance,
+    controls.maxDistance,
+  );
+  cameraGoal = {
+    position: sphere.center.clone().addScaledVector(direction, distance),
+    target: sphere.center.clone(),
+  };
 }
 
 function buildPartList() {
@@ -135,12 +189,14 @@ loader.load(
         materials.push({ material: o.material, emissive: o.material.emissive.clone() });
         o.userData.partId = id;
       });
-      const local = new THREE.Box3().setFromObject(object).getCenter(new THREE.Vector3());
+      const box = new THREE.Box3().setFromObject(object); // world space, assembled
+      const local = box.getCenter(new THREE.Vector3());
       const offset = new THREE.Vector3(...PARTS[id].explode);
       const pop = offset.lengthSq() > 0 ? offset.clone().normalize() : new THREE.Vector3(0, 1, 0);
       parts.push({
         id,
         object,
+        box,
         materials,
         center: object.worldToLocal(local),
         rest: object.position.clone(),
@@ -178,8 +234,22 @@ function pick(event) {
 }
 
 canvas.addEventListener('pointerdown', (e) => (downAt = [e.clientX, e.clientY]));
+// A listing row on the selected part's label, under the pointer.
+function pickListing(event) {
+  if (!callout) return null;
+  const rect = canvas.getBoundingClientRect();
+  pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  return callout.listingAt(raycaster);
+}
+
 canvas.addEventListener('pointerup', (e) => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
+  const listing = pickListing(e);
+  if (listing) {
+    window.open(listing.url, '_blank', 'noopener');
+    return;
+  }
   const hit = pick(e);
   if (!hit) select(null);
   else if (hit.part === selected) select(null);
@@ -187,13 +257,14 @@ canvas.addEventListener('pointerup', (e) => {
 });
 canvas.addEventListener('pointermove', (e) => {
   if (e.buttons) return;
-  const part = pick(e)?.part ?? null;
+  const onListing = Boolean(pickListing(e));
+  const part = onListing ? null : pick(e)?.part ?? null;
+  canvas.style.cursor = onListing || part ? 'pointer' : 'default';
   if (part === hovered) return;
   const previous = hovered;
   hovered = part;
   if (previous) tint(previous);
   if (part) tint(part);
-  canvas.style.cursor = part ? 'pointer' : 'default';
 });
 
 // The camera glides to `cameraGoal` when it is set, then hands control back.
@@ -224,6 +295,7 @@ function resize() {
   const shift = panel.offsetWidth ? panel.offsetWidth + 24 : 0;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
+  visibleAspect = (w - shift) / h;
   camera.setViewOffset(w + shift, h, shift, 0, w, h);
   camera.updateProjectionMatrix();
 }
@@ -246,7 +318,8 @@ renderer.setAnimationLoop(() => {
   if (cameraGoal) {
     camera.position.lerp(cameraGoal.position, k);
     controls.target.lerp(cameraGoal.target, k);
-    if (camera.position.distanceTo(cameraGoal.position) < 0.01) cameraGoal = null;
+    const arrived = camera.position.distanceTo(cameraGoal.position) < 0.01 && controls.target.distanceTo(cameraGoal.target) < 0.01;
+    if (arrived) cameraGoal = null;
   }
 
   controls.update();
@@ -259,4 +332,5 @@ window.viewer = {
   setExplode: (v) => { setExplodeTarget(v); explode = v; },
   select: (id) => select(parts.find((p) => p.id === id) ?? null),
   view: (x, y, z) => camera.position.set(x, y, z),
+  target: () => controls.target.toArray().map((v) => +v.toFixed(2)),
 };
