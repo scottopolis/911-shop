@@ -15,20 +15,23 @@ html, body {
 .brand h1 { margin: 0; font-size: 26px; letter-spacing: -0.02em; }
 .brand p { margin: 4px 0 0; font-size: 13px; color: #555; text-transform: uppercase; letter-spacing: 0.12em; }
 
-.parts {
-  position: fixed; top: 24px; right: 24px; bottom: 96px; width: 220px;
+.functions {
+  position: fixed; top: 24px; right: 24px; width: 220px; max-height: calc(100% - 120px);
   overflow: auto; padding: 14px 8px 14px 14px;
   background: rgba(255, 255, 255, 0.55); backdrop-filter: blur(10px);
   border-radius: 12px;
 }
-.parts h2 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; color: #555; }
-.parts ul { list-style: none; margin: 0; padding: 0; }
-.parts button {
-  width: 100%; text-align: left; border: 0; background: none; padding: 6px 8px;
+.functions h2 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; color: #555; }
+.functions ul { list-style: none; margin: 0; padding: 0; }
+.functions button {
+  width: 100%; display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  text-align: left; border: 0; background: none; padding: 8px;
   font: inherit; font-size: 13px; color: #222; border-radius: 6px; cursor: pointer;
 }
-.parts button:hover { background: rgba(0, 0, 0, 0.06); }
-.parts button[aria-pressed='true'] { background: #111; color: #fff; }
+.functions small { font-size: 11px; color: #777; white-space: nowrap; }
+.functions button:hover { background: rgba(0, 0, 0, 0.06); }
+.functions button[aria-pressed='true'] { background: #111; color: #fff; }
+.functions button[aria-pressed='true'] small { color: #bbb; }
 
 .controls {
   position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
@@ -55,7 +58,7 @@ html, body {
 .loading.done { opacity: 0; pointer-events: none; }
 
 @media (max-width: 800px) {
-  .parts { display: none; }
+  .functions { display: none; }
   .hint { display: none; }
   .slider span { display: none; }
   .slider input { width: 120px; }

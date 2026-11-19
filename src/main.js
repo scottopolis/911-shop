@@ -4,11 +4,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { PARTS } from './parts.js';
-import { Callout } from './callout.js';
 import { addDecals } from './decals.js';
-import SHOP_LINKS from './shop-links.json';
 
-const POP_DISTANCE = 0.35; // how far a selected part slides out, in meters
 // Porsche Chalk, a light neutral grey; darker than the real swatch because the studio
 // lighting and tone mapping brighten it.
 const CHALK = new THREE.Color('#7f817e');
@@ -20,7 +17,30 @@ const AWAY_DISTANCE = 3.5;
 const GHOST_OPACITY = 0.1;
 // Emissive tints are linear and add to every material, so keep them faint.
 const HOVER_COLOR = new THREE.Color(0x3b82f6).multiplyScalar(0.015);
-const SELECT_COLOR = new THREE.Color(0x3b82f6).multiplyScalar(0.03);
+// The steering wheel turns up to 1.25 turns each way, about the real car's lock.
+const MAX_STEER = Math.PI * 2.5;
+// When a door or the front lid opens, the lights blink twice: on for FLASH_ON
+// seconds, off as long, then on again.
+const FLASH_ON = 0.18;
+const FLASH_BLINKS = 2;
+// The materials that light up in each lamp, and their color when lit.
+const LAMPS = {
+  headlight_l: new THREE.Color(1, 0.96, 0.9),
+  headlight_r: new THREE.Color(1, 0.96, 0.9),
+  taillight: new THREE.Color(1, 0.02, 0.02),
+};
+const LAMP_MATERIAL = /lights|pattern|grid|red_light/;
+
+// What the side panel lists. A part id opens and closes that part's hinge;
+// `flash` blinks the lights when it opens. `interior` items stay listed in the
+// interior view.
+const FUNCTIONS = [
+  { id: 'hood', name: 'Front lid', open: 'Open', close: 'Close', flash: true },
+  { id: 'door_l', name: 'Driver door', open: 'Open', close: 'Close', flash: true },
+  { id: 'door_r', name: 'Passenger door', open: 'Open', close: 'Close', flash: true },
+  { id: 'steering', name: 'Steering wheel', interior: true },
+  { id: 'lights', name: 'Lights' },
+];
 
 const canvas = document.getElementById('scene');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -59,42 +79,43 @@ ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
 
-// One record per part: its object, its rest position, how far it explodes and
-// the materials to tint when it is hovered or selected.
+// One record per part: its object, its rest pose, how far it explodes and the
+// materials to tint when it is hovered.
 const parts = [];
+const partById = {};
+const lampMaterials = [];
 let explode = 0;
 let explodeTarget = 0;
 let hovered = null;
-let selected = null;
-let callout = null;
-let carTop = 1.3;
-let visibleAspect = 1; // aspect of the canvas area not covered by the parts panel
 // The camera glides to `cameraGoal` when it is set, then hands control back.
 let cameraGoal = null;
 let inside = 0; // 0 = whole car, 1 = interior view
 let insideTarget = 0;
+let steer = 0; // steering wheel angle in radians, positive turns right
+let steerTarget = 0;
+let dragging = null; // the pointer's last angle around the wheel's hub while it turns the wheel
+let flashStart = -Infinity;
+let flashLevel = 0;
 
 const explodeBtn = document.getElementById('explode-btn');
 const explodeRange = document.getElementById('explode-range');
-const partList = document.getElementById('part-list');
+const functionList = document.getElementById('function-list');
 const interiorBtn = document.getElementById('interior-btn');
 
 const home = () => (insideTarget > 0.5 ? INTERIOR_HOME : HOME);
-// Labels float over the roofline, or just over the seats once the roof is gone.
-const labelFloor = () => (insideTarget > 0.5 ? 1.35 : carTop + 0.35);
-// Interior parts are small, so their labels are too.
-const labelSize = () => (insideTarget > 0.5 ? 0.5 : 1);
-// Inside, the camera looks down, so a label just beyond the part shows above it.
-const labelReach = () => (insideTarget > 0.5 ? -0.8 : 0.7);
 // Parts that can be clicked: in the interior view, only the interior ones.
 const pickable = (part) => (insideTarget > 0.5 ? part.interior : true);
+// The part a click on this one opens or closes, if any.
+const opener = (part) => {
+  const target = partById[PARTS[part.id].opens ?? part.id];
+  return target?.hinge ? target : null;
+};
 
 function setInterior(on) {
-  select(null);
   insideTarget = on ? 1 : 0;
   interiorBtn.textContent = on ? 'Exterior' : 'Interior';
   interiorBtn.setAttribute('aria-pressed', String(on));
-  for (const li of partList.children) li.hidden = on && !PARTS[li.dataset.id].interior;
+  for (const li of functionList.children) li.hidden = on && !FUNCTIONS[li.dataset.index].interior;
   cameraGoal = { position: home().position.clone(), target: home().target.clone() };
 }
 
@@ -124,111 +145,57 @@ function setExplodeTarget(value) {
 }
 
 function tint(part) {
-  const color = part === selected ? SELECT_COLOR : part === hovered ? HOVER_COLOR : null;
+  const color = part === hovered ? HOVER_COLOR : null;
   for (const { material, emissive } of part.materials) material.emissive.copy(color ?? emissive);
 }
 
-function select(part, localAnchor) {
-  const previous = selected;
-  selected = part;
-  if (previous) tint(previous);
-  callout?.dispose();
-  callout = null;
-  for (const btn of partList.children) btn.firstChild.setAttribute('aria-pressed', String(btn.dataset.id === part?.id));
-  if (!part) {
-    // Put the orbit pivot back on the car and pull out to the whole-car distance,
-    // keeping the current viewing angle.
-    if (previous) {
-      const { position, target } = home();
-      const distance = position.distanceTo(target) * (explodeTarget > 0.5 ? 1.4 : 1);
-      const dir = camera.position.clone().sub(controls.target).normalize();
-      cameraGoal = { position: target.clone().addScaledVector(dir, distance), target: target.clone() };
-    }
-    return;
-  }
-  tint(part);
-
-  // Where the part comes to rest once its explode and pop-out animations finish.
-  const box = part.box.clone().translate(part.offset.clone().multiplyScalar(explodeTarget));
-  if (!PARTS[part.id].reveals) box.translate(part.pop);
-  const partCenter = box.getCenter(new THREE.Vector3());
-
-  // Look at the part from the side it slides out toward, turned a little toward
-  // where the camera already is so the view keeps some depth. Parts that slide
-  // straight up (roof, seats) are seen from the side the camera is on.
-  const camSide = camera.position.clone().sub(controls.target).setY(0).normalize();
-  const slide = part.offset.lengthSq() > 0 ? part.offset.clone() : partCenter.clone();
-  slide.setY(0);
-  const view = PARTS[part.id].view;
-  const side = view
-    ? new THREE.Vector3(view[0], 0, view[2]).normalize()
-    : (slide.length() > 0.2 ? slide.normalize() : camSide.clone()).addScaledVector(camSide, 0.35).normalize();
-
-  // The label faces that side, snapped to the car's axes so it reads like a page
-  // pinned to the car.
-  const outward = Math.abs(side.x) > Math.abs(side.z)
-    ? new THREE.Vector3(Math.sign(side.x), 0, 0)
-    : new THREE.Vector3(0, 0, Math.sign(side.z));
-  // A low eye line keeps the label, which floats over the roofline, against the
-  // background instead of over the car.
-  // Inside the cabin the camera looks down over the seats instead.
-  // A part's view can set its own eye height, such as looking down into the frunk.
-  const direction = side.clone().setY(view?.[1] || (insideTarget > 0.5 ? 0.9 : 0.22)).normalize();
-
-  // The label text runs away from the car's center (the origin) when the part is
-  // off to one side, otherwise toward the right of the screen.
-  const textDir = new THREE.Vector3(0, 1, 0).cross(outward);
-  const lateral = textDir.dot(partCenter);
-  const screenRight = direction.clone().negate().cross(new THREE.Vector3(0, 1, 0));
-  if (Math.abs(lateral) > 0.3 ? lateral < 0 : textDir.dot(screenRight) < 0) textDir.negate();
-
-  callout = new Callout(PARTS[part.id], part.object, localAnchor ?? part.center, {
-    outward,
-    textDir,
-    minY: labelFloor(),
-    size: labelSize(),
-    // Lean the label back toward a camera that looks down on the part.
-    tilt: insideTarget > 0.5 || view?.[1] > 0.5 ? 0.7 : 0,
-    reach: labelReach(),
-    listings: SHOP_LINKS[part.id] ?? [],
-  });
-  scene.add(callout.group);
-
-  // Frame the part together with its label: Callout puts the label's bottom edge
-  // 0.7 m out and above the part (at least over the roofline), with the label
-  // running 1.5 m along textDir and callout.height up from there.
-  const size = labelSize();
-  const labelAt = partCenter.clone().addScaledVector(outward, labelReach() * size);
-  labelAt.y = Math.max(labelAt.y + 0.5 * size, labelFloor());
-  box.expandByPoint(labelAt)
-    .expandByPoint(labelAt.clone().addScaledVector(textDir, 1.5 * size).setY(labelAt.y + callout.height));
-  const sphere = box.getBoundingSphere(new THREE.Sphere());
-  const fov = THREE.MathUtils.degToRad(camera.fov) / 2;
-  const fovX = Math.atan(Math.tan(fov) * visibleAspect);
-  const distance = THREE.MathUtils.clamp(
-    (sphere.radius / Math.sin(Math.min(fov, fovX))) * 1.05,
-    controls.minDistance,
-    controls.maxDistance,
-  );
-  cameraGoal = {
-    position: sphere.center.clone().addScaledVector(direction, distance),
-    target: sphere.center.clone(),
-  };
+function toggle(part) {
+  part.openTarget = part.openTarget ? 0 : 1;
+  if (part.openTarget && FUNCTIONS.find((f) => f.id === part.id)?.flash) flash();
+  updateFunctionList();
 }
 
-function buildPartList() {
-  for (const part of parts) {
-    if (part.id === 'body') continue;
+function flash() {
+  flashStart = performance.now() / 1000;
+}
+
+function centerSteering() {
+  steerTarget = 0;
+  updateFunctionList();
+}
+
+// What each function's button does next, shown on the right of the button.
+function functionState(f) {
+  if (f.id === 'steering') return Math.abs(steerTarget) > 0.01 ? 'Center' : 'Drag to turn';
+  if (f.id === 'lights') return 'Flash';
+  return partById[f.id].openTarget ? f.close : f.open;
+}
+
+function updateFunctionList() {
+  for (const li of functionList.children) {
+    const f = FUNCTIONS[li.dataset.index];
+    const btn = li.firstChild;
+    btn.lastChild.textContent = functionState(f);
+    if (partById[f.id]) btn.setAttribute('aria-pressed', String(Boolean(partById[f.id].openTarget)));
+  }
+}
+
+function buildFunctionList() {
+  FUNCTIONS.forEach((f, index) => {
     const li = document.createElement('li');
-    li.dataset.id = part.id;
+    li.dataset.index = index;
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.textContent = PARTS[part.id].name;
-    btn.setAttribute('aria-pressed', 'false');
-    btn.addEventListener('click', () => select(selected === part ? null : part));
+    const name = document.createElement('span');
+    name.textContent = f.name;
+    btn.append(name, document.createElement('small'));
+    if (partById[f.id]) btn.addEventListener('click', () => toggle(partById[f.id]));
+    if (f.id === 'steering') btn.addEventListener('click', centerSteering);
+    if (f.id === 'lights') btn.addEventListener('click', flash);
     li.append(btn);
-    partList.append(li);
-  }
+    functionList.append(li);
+  });
+  updateFunctionList();
 }
 
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
@@ -239,13 +206,14 @@ loader.load(
     const box = new THREE.Box3().setFromObject(car);
     const center = box.getCenter(new THREE.Vector3());
     car.position.set(-center.x, -box.min.y, -center.z);
-    carTop = box.max.y - box.min.y;
     scene.add(gltf.scene);
     scene.updateMatrixWorld(true);
 
+    const vector = (v) => v && new THREE.Vector3(...v);
     for (const object of [...car.children]) {
       const id = object.name;
-      if (!PARTS[id]) {
+      const info = PARTS[id];
+      if (!info) {
         console.warn(`No part info for "${id}"`);
         continue;
       }
@@ -258,37 +226,33 @@ loader.load(
         if (o.material.name === 'belts') o.material.color.copy(BELT_RED);
         const { emissive, opacity, transparent, depthWrite } = o.material;
         materials.push({ material: o.material, emissive: emissive.clone(), opacity, transparent, depthWrite });
+        if (LAMPS[id] && LAMP_MATERIAL.test(o.material.name)) {
+          lampMaterials.push({ material: o.material, color: LAMPS[id], emissive: emissive.clone(), intensity: o.material.emissiveIntensity });
+        }
         o.userData.partId = id;
       });
-      const box = new THREE.Box3().setFromObject(object); // world space, assembled
-      const local = box.getCenter(new THREE.Vector3());
-      const offset = new THREE.Vector3(...PARTS[id].explode);
-      const pop = offset.lengthSq() > 0 ? offset.clone().normalize() : new THREE.Vector3(0, 1, 0);
-      parts.push({
+      const offset = new THREE.Vector3(...info.explode);
+      const swing = (s) => s && { ...s, pivot: vector(s.pivot), axis: vector(s.axis).normalize() };
+      const part = {
         id,
         object,
-        box,
         materials,
-        center: object.worldToLocal(local),
         rest: object.position.clone(),
         restQuaternion: object.quaternion.clone(),
-        hinge: PARTS[id].hinge && {
-          pivot: new THREE.Vector3(...PARTS[id].hinge.pivot),
-          axis: new THREE.Vector3(...PARTS[id].hinge.axis).normalize(),
-          angle: PARTS[id].hinge.angle,
-        },
+        hinge: swing(info.hinge),
+        steer: swing(info.steer),
         openAmount: 0,
+        openTarget: 0,
         offset,
-        pop: pop.multiplyScalar(id === 'body' ? 0 : POP_DISTANCE),
-        popAmount: 0,
-        interior: Boolean(PARTS[id].interior),
+        interior: Boolean(info.interior),
         away: offset.clone().normalize().multiplyScalar(AWAY_DISTANCE),
         fade: 1,
-      });
+      };
+      parts.push(part);
+      partById[id] = part;
     }
-    addDecals(car, (id) => parts.find((p) => p.id === id)?.object);
-    parts.sort((a, b) => PARTS[a.id].name.localeCompare(PARTS[b.id].name));
-    buildPartList();
+    addDecals(car, (id) => partById[id]?.object);
+    buildFunctionList();
     document.getElementById('loading').classList.add('done');
   },
   (e) => {
@@ -300,48 +264,75 @@ loader.load(
   },
 );
 
-// Picking: a click selects the part under the pointer; a drag only orbits.
+// A click on a part opens or closes it; dragging the steering wheel turns it;
+// any other drag orbits the camera.
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 let downAt = null;
 
+// The part under the pointer. Glass and other see-through surfaces let clicks
+// through, so the steering wheel can be grabbed through a window.
 function pick(event) {
   const rect = canvas.getBoundingClientRect();
   pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
-  const hit = raycaster.intersectObjects(parts.filter(pickable).map((p) => p.object), true)[0];
-  if (!hit) return null;
-  const part = parts.find((p) => p.id === hit.object.userData.partId);
-  return { part, point: part.object.worldToLocal(hit.point.clone()) };
+  const hits = raycaster.intersectObjects(parts.filter(pickable).map((p) => p.object), true);
+  const hit = hits.find((h) => !h.object.material.transparent);
+  return hit ? partById[hit.object.userData.partId] : null;
 }
 
-canvas.addEventListener('pointerdown', (e) => (downAt = [e.clientX, e.clientY]));
-// A listing row on the selected part's label, under the pointer.
-function pickListing(event) {
-  if (!callout) return null;
+const isWheel = (part) => part?.id === 'steering_wheel';
+
+// The pointer's angle around the steering wheel's hub on screen, counterclockwise.
+function angleAroundHub(event) {
+  const wheel = partById.steering_wheel;
+  const hub = wheel.object.localToWorld(wheel.steer.pivot.clone()).project(camera);
   const rect = canvas.getBoundingClientRect();
-  pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
-  raycaster.setFromCamera(pointer, camera);
-  return callout.listingAt(raycaster);
+  const x = event.clientX - rect.left - ((hub.x + 1) / 2) * rect.width;
+  const y = rect.top + ((1 - hub.y) / 2) * rect.height - event.clientY;
+  return Math.atan2(y, x);
 }
+
+// Runs before OrbitControls sees the press, so grabbing the wheel does not orbit.
+canvas.addEventListener('pointerdown', (e) => {
+  downAt = [e.clientX, e.clientY];
+  if (!isWheel(pick(e))) return;
+  controls.enabled = false;
+  canvas.setPointerCapture(e.pointerId);
+  dragging = angleAroundHub(e);
+  canvas.style.cursor = 'grabbing';
+}, { capture: true });
 
 canvas.addEventListener('pointerup', (e) => {
-  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
-  const listing = pickListing(e);
-  if (listing) {
-    window.open(listing.url, '_blank', 'noopener');
+  if (dragging !== null) {
+    dragging = null;
+    controls.enabled = true;
+    updateFunctionList();
     return;
   }
-  const hit = pick(e);
-  if (!hit) select(null);
-  else if (hit.part === selected) select(null);
-  else select(hit.part, hit.point);
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
+  const part = pick(e);
+  if (part && opener(part)) toggle(opener(part));
 });
+
 canvas.addEventListener('pointermove', (e) => {
+  if (dragging !== null) {
+    const angle = angleAroundHub(e);
+    const delta = Math.atan2(Math.sin(angle - dragging), Math.cos(angle - dragging));
+    dragging = angle;
+    // Seen from the driver's seat, behind the wheel, a counterclockwise drag on
+    // screen turns it left; seen from the front, the screen is mirrored.
+    const wheel = partById.steering_wheel;
+    const hub = wheel.object.localToWorld(wheel.steer.pivot.clone());
+    const facing = Math.sign(wheel.steer.axis.dot(camera.position.clone().sub(hub))) || 1;
+    steerTarget = THREE.MathUtils.clamp(steerTarget + delta * facing, -MAX_STEER, MAX_STEER);
+    steer = steerTarget;
+    return;
+  }
   if (e.buttons) return;
-  const onListing = Boolean(pickListing(e));
-  const part = onListing ? null : pick(e)?.part ?? null;
-  canvas.style.cursor = onListing || part ? 'pointer' : 'default';
+  const under = pick(e);
+  const part = under && (opener(under) || isWheel(under)) ? under : null;
+  canvas.style.cursor = isWheel(part) ? 'grab' : part ? 'pointer' : 'default';
   if (part === hovered) return;
   const previous = hovered;
   hovered = part;
@@ -363,18 +354,16 @@ document.getElementById('reset-btn').addEventListener('click', () => {
   setInterior(false);
 });
 controls.addEventListener('start', () => (cameraGoal = null));
-window.addEventListener('keydown', (e) => e.key === 'Escape' && select(null));
 
 const timer = new THREE.Timer();
 
-// Center the car in the space left of the parts panel.
+// Center the car in the space left of the side panel.
 function resize() {
   const { clientWidth: w, clientHeight: h } = canvas;
-  const panel = document.querySelector('.parts');
+  const panel = document.querySelector('.functions');
   const shift = panel.offsetWidth ? panel.offsetWidth + 24 : 0;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
-  visibleAspect = (w - shift) / h;
   camera.setViewOffset(w + shift, h, shift, 0, w, h);
   camera.updateProjectionMatrix();
 }
@@ -392,23 +381,30 @@ renderer.setAnimationLoop(() => {
   inside += (insideTarget - inside) * k;
   if (Math.abs(insideTarget - inside) < 0.001) inside = insideTarget;
 
+  if (dragging === null) steer += (steerTarget - steer) * k;
+
   for (const part of parts) {
-    // The selected part slides out, unless it reveals one that swings open over it.
-    const reveals = selected && PARTS[selected.id].reveals;
-    part.popAmount += ((part === selected && !reveals ? 1 : 0) - part.popAmount) * k;
-    part.openAmount += ((reveals === part.id ? 1 : 0) - part.openAmount) * k;
+    part.openAmount += (part.openTarget - part.openAmount) * k;
     part.object.position.copy(part.rest);
     part.object.quaternion.copy(part.restQuaternion);
-    if (part.hinge) {
-      // Swing about the hinge: rotate the part's origin around the pivot too.
-      const turn = new THREE.Quaternion().setFromAxisAngle(part.hinge.axis, part.hinge.angle * part.openAmount);
-      part.object.position.sub(part.hinge.pivot).applyQuaternion(turn).add(part.hinge.pivot);
-      part.object.quaternion.premultiply(turn);
-    }
-    part.object.position.addScaledVector(part.offset, explode).addScaledVector(part.pop, part.popAmount);
+    if (part.hinge) swing(part, part.hinge, part.hinge.angle * part.openAmount);
+    if (part.steer) swing(part, part.steer, part.steer.ratio * steer);
+    part.object.position.addScaledVector(part.offset, explode);
     if (part.interior) continue;
     part.object.position.addScaledVector(part.away, inside);
     fade(part, part.id === 'body' ? 1 - (1 - GHOST_OPACITY) * inside : 1 - inside);
+  }
+
+  // The lamps follow the blink pattern, easing on and off over a few frames.
+  const t = performance.now() / 1000 - flashStart;
+  const lit = t < FLASH_ON * (2 * FLASH_BLINKS - 1) && Math.floor(t / FLASH_ON) % 2 === 0 ? 1 : 0;
+  if (flashLevel !== lit) {
+    flashLevel += (lit - flashLevel) * (1 - Math.exp(-dt * 40));
+    if (Math.abs(lit - flashLevel) < 1e-3) flashLevel = lit;
+    for (const m of lampMaterials) {
+      m.material.emissive.copy(m.emissive).lerp(m.color, flashLevel);
+      m.material.emissiveIntensity = m.intensity * (1 + 7 * flashLevel);
+    }
   }
 
   if (cameraGoal) {
@@ -419,16 +415,25 @@ renderer.setAnimationLoop(() => {
   }
 
   controls.update();
-  callout?.update(camera);
   renderer.render(scene, camera);
 });
+
+// Rotates a part about a swing's pivot and axis by `angle`, rotating its origin
+// around the pivot too.
+function swing(part, { pivot, axis }, angle) {
+  const turn = new THREE.Quaternion().setFromAxisAngle(axis, angle);
+  part.object.position.sub(pivot).applyQuaternion(turn).add(pivot);
+  part.object.quaternion.premultiply(turn);
+}
 
 // Hooks for automated screenshots and debugging.
 window.viewer = {
   setExplode: (v) => { setExplodeTarget(v); explode = v; },
-  select: (id) => select(parts.find((p) => p.id === id) ?? null),
+  toggle: (id) => toggle(partById[id]),
+  steer: (radians) => { steerTarget = radians; updateFunctionList(); },
+  flash,
   interior: setInterior,
-  state: () => ({ inside: +inside.toFixed(3), explode: +explode.toFixed(3) }),
+  state: () => ({ inside: +inside.toFixed(3), explode: +explode.toFixed(3), steer: +steer.toFixed(3) }),
   view: (x, y, z) => camera.position.set(x, y, z),
   target: () => controls.target.toArray().map((v) => +v.toFixed(2)),
 };

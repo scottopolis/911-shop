@@ -14,16 +14,25 @@
 // cockpit parts are seen from the seats. A nonzero y sets how high the camera
 // looks from instead of the default.
 //
-// `reveals` names a part that swings open on its `hinge` when this one is
-// selected, for a part hidden under another, such as the frunk under the front
-// lid. A hinge is a pivot point and axis in car space, and how far it opens in
-// radians.
+// A part with a `hinge` opens and closes when it is clicked. `opens` makes a
+// click on this part work another one instead, such as the frunk opening the
+// front lid over it. A hinge is a pivot point and axis in car space, and how
+// far it opens in radians.
+//
+// `steer` turns a part with the steering wheel: about an axis through a pivot,
+// by `ratio` radians per radian the wheel turns.
+
+// The front wheels and brakes turn about a vertical axis through the hub, at
+// about 1/15 of the steering wheel's angle; turning right yaws them toward +z.
+const frontSteer = (side) => ({ pivot: [-1.04, 0.19, 0.78 * side], axis: [0, 1, 0], ratio: -1 / 15 });
+
 const wheel = (front, side) => ({
   name: `${front ? 'Front' : 'Rear'} ${side === 1 ? 'right' : 'left'} wheel & tire`,
   bullets: front
     ? ['20-inch Turbo S alloy rim', '255/35 ZR 20 performance tire', 'Center-lock style hub with Porsche crest']
     : ['21-inch staggered alloy rim', '315/30 ZR 21 performance tire', 'Wider rear track for traction'],
   explode: [0, 0, 0.95 * side],
+  steer: front ? frontSteer(side) : undefined,
   shop: {
     query: `Porsche 992 Turbo S ${front ? 'front 20 inch' : 'rear 21 inch'} centerlock wheel`,
     match: front ? /wheel.*(front|20x)|(front|20x).*wheel/i : /wheel.*(rear|21x)|(rear|21x).*wheel/i,
@@ -36,6 +45,7 @@ const brake = (front, side) => ({
     ? ['Porsche Ceramic Composite Brake (PCCB), standard on Turbo S', '10-piston monobloc caliper', '420 mm carbon-ceramic disc']
     : ['Porsche Ceramic Composite Brake (PCCB)', 'Four-piston monobloc caliper', '390 mm carbon-ceramic disc'],
   explode: [0, 0, 0.5 * side],
+  steer: front ? frontSteer(side) : undefined,
   shop: {
     query: `Porsche 992 Turbo S ${front ? 'front' : 'rear'} PCCB brake rotor`,
     match: /rotor|disc|brake|caliper/i,
@@ -57,7 +67,7 @@ export const PARTS = {
     shop: { query: 'Porsche 992 Turbo S front hood', match: /hood|bonnet|front lid/i },
   },
   frunk: {
-    reveals: 'hood',
+    opens: 'hood',
     view: [1, 0.9, 0.35],
     name: 'Front trunk (frunk)',
     bullets: ['128-liter luggage compartment under the front lid', 'Carpeted tub between the front wheel arches', 'Warning triangle stowed on the rear wall'],
@@ -92,12 +102,14 @@ export const PARTS = {
     name: 'Left door',
     bullets: ['Aluminum door skin', 'Frameless side window', 'Includes exterior mirror and door card'],
     explode: [0, 0.15, -1.1],
+    hinge: { pivot: [-1.627, 0, -0.831], axis: [0, -1, 0], angle: 1.0 },
     shop: { query: 'Porsche 992 carbon door', match: /\bdoors?\b/i, exclude: /sill|trim|armrest|strap|mats?\b/i },
   },
   door_r: {
     name: 'Right door',
     bullets: ['Aluminum door skin', 'Frameless side window', 'Includes exterior mirror and door card'],
     explode: [0, 0.15, 1.1],
+    hinge: { pivot: [-1.627, 0, 0.831], axis: [0, 1, 0], angle: 1.0 },
     shop: { query: 'Porsche 992 carbon door', match: /\bdoors?\b/i, exclude: /sill|trim|armrest|strap|mats?\b/i },
   },
   fender_l: {
@@ -202,6 +214,8 @@ export const PARTS = {
     name: 'Steering wheel',
     bullets: ['GT sport steering wheel', 'Paddle shifters for the 8-speed PDK', 'Drive mode switch'],
     explode: [0.3, 1.35, 0],
+    // Matches STEERING_HUB and STEERING_AXIS in scripts/build-model.mjs.
+    steer: { pivot: [-2.058, 0.626, -0.34], axis: [0.968, -0.25, 0], ratio: 1 },
     shop: { query: 'Porsche 992 steering wheel', match: /steering wheel/i },
   },
   seat_l: {

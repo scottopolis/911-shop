@@ -21,6 +21,10 @@ if (!src || !out) throw new Error('usage: build-model.mjs <source.glb> <output.g
 const WHEEL_X = { front: -1.04, rear: -3.49 };
 const HUB_Y = 0.19;
 const STEERING = [-2.05, 0.64, -0.34];
+// The wheel's hub and the axis it turns about, pointing forward down the
+// column; src/parts.js turns the wheel about the same axis.
+const STEERING_HUB = [-2.058, 0.626, -0.34];
+const STEERING_AXIS = [0.968, -0.25, 0];
 
 const INTERIOR = /leather|plastic_all|carbon|chrome_int|monitors|steering|logo_all|glossy_plastic|dynamics|reisin|black_metal|metal_parts/;
 const SEAT = /leather_all|plast_leather_all|plastic_all|carbon_all|chrome_int|logo_all/;
@@ -58,6 +62,13 @@ function classify({ node, door, c, s, max }) {
   if (isBody && x > -1.7 && az > 0.4 && s[0] > 1) return `fender_${side}`;
   if (isBody && y > 1.0) return 'roof';
 
+  // The rear spoiler: the body-colored blade across the tail and the third
+  // brake light on it.
+  if (x < -4.15 && y > 0.74 && y < 0.82 && s[0] < 0.35 && s[2] > 0.4 && (isBody || /^reflectors/.test(node))) return 'spoiler';
+  // The pedestal the blade stands on, which rises out of the tail, and the
+  // black arms that lift it.
+  if (isBody && x < -4.15 && y > 0.65 && y < 0.75 && s[0] < 0.4 && s[1] < 0.2 && s[2] > 1.2) return 'spoiler';
+  if (/bl_pl_M_ext/.test(node) && x < -4.14 && y > 0.65 && y < 0.75 && max < 0.35) return 'spoiler';
   if (!isBody && x < -3.9 && y > 0.5 && y < 0.7 && s[1] < 0.15 && /red_light|trans_covers|glossy|reflectors|lights_pattern|logo_all/.test(node)) return 'taillight';
   if (x < -3.95 && y > 0.65 && az < 0.75 && (isBody || /bl_pl_M_ext|black_metal|plastic_exterior|service_black/.test(node))) return 'decklid';
   if (x < -3.7 && y < 0.5 && !/rugs|upholstery|belts/.test(node)) return 'rear_bumper';
@@ -71,7 +82,12 @@ function classify({ node, door, c, s, max }) {
     if (x < -3.3 && az < 0.3) return 'rear_window';
   }
 
-  if (INTERIOR.test(node) && Math.hypot(x - STEERING[0], y - STEERING[1], z - STEERING[2]) < 0.22 && max < 0.45) return 'steering_wheel';
+  if (INTERIOR.test(node) && Math.hypot(x - STEERING[0], y - STEERING[1], z - STEERING[2]) < 0.22 && max < 0.45) {
+    // The rim, spokes and paddles sit within 8 cm of the hub along the column;
+    // the column shroud and stalks behind them stay put when the wheel turns.
+    const along = [0, 1, 2].reduce((sum, k) => sum + (c[k] - STEERING_HUB[k]) * STEERING_AXIS[k], 0);
+    return along < 0.08 ? 'steering_wheel' : 'dashboard';
+  }
   // PDK selector and its trim, on the console between the seats.
   if (INTERIOR.test(node) && x > -2.13 && x < -1.94 && az < 0.1 && y > 0.36 && y < 0.5 && max < 0.25) return 'shifter';
   if (SEAT.test(node) && x > -2.95 && x < -2.05 && az > 0.12 && az < 0.6 && y > 0.05 && y < 1.0 && max < 0.75) return `seat_${side}`;
@@ -282,7 +298,7 @@ function addFrunk() {
   partMesh('frunk').addPrimitive(primitive(lp, lu, li, plastic));
 
   // Warning-triangle case, clipped to the rear wall.
-  const red = doc.createMaterial('warning_red').setBaseColorFactor([0.55, 0.02, 0.03, 1]).setRoughnessFactor(0.45).setMetallicFactor(0).setDoubleSided(true);
+  const black = doc.createMaterial('warning_case').setBaseColorFactor([0.02, 0.02, 0.022, 1]).setRoughnessFactor(0.45).setMetallicFactor(0).setDoubleSided(true);
   const [bx, by, bz] = [-1.3, 0.4, 0];
   const [hx, hy, hz] = [0.025, 0.025, 0.2];
   const bp = [];
@@ -302,7 +318,34 @@ function addFrunk() {
     }
     bi.push(base, base + 1, base + 2, base, base + 2, base + 3);
   }
-  partMesh('frunk').addPrimitive(primitive(bp, bu, bi, red));
+  partMesh('frunk').addPrimitive(primitive(bp, bu, bi, black));
+}
+
+// The source models the spoiler raised: the blade stands on a pedestal that
+// rises out of the tail. The car shows it stowed, flush on the tail with its
+// trailing edge just above the light bar. Squash every point toward the tail's
+// surface, keeping STOWED_HEIGHT of its height above it, then fold it into the
+// engine lid. That surface starts at the light bar's top edge, which sweeps
+// forward toward the car's sides, and rises forward along the engine lid.
+const LIGHT_BAR_TOP = 0.64;
+const DECK_SLOPE = 0.38; // rise per meter forward of the light bar
+const STOWED_HEIGHT = 0.25;
+function stowSpoiler() {
+  // The light bar's top edge, measured at |z| = 0 to 0.7.
+  const edgeX = (z) => -4.44 + 0.24 * (Math.abs(z) / 0.7) ** 3;
+  const floorAt = (x, z) => LIGHT_BAR_TOP + DECK_SLOPE * (x - edgeX(z));
+  const spoiler = partNodes.get('spoiler');
+  for (const prim of spoiler.getMesh().listPrimitives()) {
+    const pos = prim.getAttribute('POSITION');
+    for (let i = 0; i < pos.getCount(); i++) {
+      const [x, y, z] = pos.getElement(i, []);
+      const floor = floorAt(x, z);
+      if (y > floor) pos.setElement(i, [x, floor + (y - floor) * STOWED_HEIGHT, z]);
+    }
+    partMesh('decklid').addPrimitive(prim);
+  }
+  spoiler.dispose();
+  partNodes.delete('spoiler');
 }
 
 // A triangle primitive from flat arrays, with smooth normals.
@@ -366,6 +409,7 @@ for (const n of sourceNodes) {
 }
 
 addFrunk();
+stowSpoiler();
 
 for (const child of scene.listChildren()) scene.removeChild(child);
 scene.addChild(car);
