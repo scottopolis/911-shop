@@ -149,7 +149,8 @@ function select(part, localAnchor) {
   tint(part);
 
   // Where the part comes to rest once its explode and pop-out animations finish.
-  const box = part.box.clone().translate(part.offset.clone().multiplyScalar(explodeTarget).add(part.pop));
+  const box = part.box.clone().translate(part.offset.clone().multiplyScalar(explodeTarget));
+  if (!PARTS[part.id].reveals) box.translate(part.pop);
   const partCenter = box.getCenter(new THREE.Vector3());
 
   // Look at the part from the side it slides out toward, turned a little toward
@@ -158,8 +159,9 @@ function select(part, localAnchor) {
   const camSide = camera.position.clone().sub(controls.target).setY(0).normalize();
   const slide = part.offset.lengthSq() > 0 ? part.offset.clone() : partCenter.clone();
   slide.setY(0);
-  const side = PARTS[part.id].view
-    ? new THREE.Vector3(...PARTS[part.id].view).normalize()
+  const view = PARTS[part.id].view;
+  const side = view
+    ? new THREE.Vector3(view[0], 0, view[2]).normalize()
     : (slide.length() > 0.2 ? slide.normalize() : camSide.clone()).addScaledVector(camSide, 0.35).normalize();
 
   // The label faces that side, snapped to the car's axes so it reads like a page
@@ -170,7 +172,8 @@ function select(part, localAnchor) {
   // A low eye line keeps the label, which floats over the roofline, against the
   // background instead of over the car.
   // Inside the cabin the camera looks down over the seats instead.
-  const direction = side.clone().setY(insideTarget > 0.5 ? 0.9 : 0.22).normalize();
+  // A part's view can set its own eye height, such as looking down into the frunk.
+  const direction = side.clone().setY(view?.[1] || (insideTarget > 0.5 ? 0.9 : 0.22)).normalize();
 
   // The label text runs away from the car's center (the origin) when the part is
   // off to one side, otherwise toward the right of the screen.
@@ -184,7 +187,8 @@ function select(part, localAnchor) {
     textDir,
     minY: labelFloor(),
     size: labelSize(),
-    tilt: insideTarget > 0.5 ? 0.7 : 0,
+    // Lean the label back toward a camera that looks down on the part.
+    tilt: insideTarget > 0.5 || view?.[1] > 0.5 ? 0.7 : 0,
     reach: labelReach(),
     listings: SHOP_LINKS[part.id] ?? [],
   });
@@ -267,6 +271,13 @@ loader.load(
         materials,
         center: object.worldToLocal(local),
         rest: object.position.clone(),
+        restQuaternion: object.quaternion.clone(),
+        hinge: PARTS[id].hinge && {
+          pivot: new THREE.Vector3(...PARTS[id].hinge.pivot),
+          axis: new THREE.Vector3(...PARTS[id].hinge.axis).normalize(),
+          angle: PARTS[id].hinge.angle,
+        },
+        openAmount: 0,
         offset,
         pop: pop.multiplyScalar(id === 'body' ? 0 : POP_DISTANCE),
         popAmount: 0,
@@ -382,8 +393,19 @@ renderer.setAnimationLoop(() => {
   if (Math.abs(insideTarget - inside) < 0.001) inside = insideTarget;
 
   for (const part of parts) {
-    part.popAmount += ((part === selected ? 1 : 0) - part.popAmount) * k;
-    part.object.position.copy(part.rest).addScaledVector(part.offset, explode).addScaledVector(part.pop, part.popAmount);
+    // The selected part slides out, unless it reveals one that swings open over it.
+    const reveals = selected && PARTS[selected.id].reveals;
+    part.popAmount += ((part === selected && !reveals ? 1 : 0) - part.popAmount) * k;
+    part.openAmount += ((reveals === part.id ? 1 : 0) - part.openAmount) * k;
+    part.object.position.copy(part.rest);
+    part.object.quaternion.copy(part.restQuaternion);
+    if (part.hinge) {
+      // Swing about the hinge: rotate the part's origin around the pivot too.
+      const turn = new THREE.Quaternion().setFromAxisAngle(part.hinge.axis, part.hinge.angle * part.openAmount);
+      part.object.position.sub(part.hinge.pivot).applyQuaternion(turn).add(part.hinge.pivot);
+      part.object.quaternion.premultiply(turn);
+    }
+    part.object.position.addScaledVector(part.offset, explode).addScaledVector(part.pop, part.popAmount);
     if (part.interior) continue;
     part.object.position.addScaledVector(part.away, inside);
     fade(part, part.id === 'body' ? 1 - (1 - GHOST_OPACITY) * inside : 1 - inside);

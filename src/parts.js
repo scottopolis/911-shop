@@ -11,7 +11,13 @@
 // `interior` parts stay in place and stay selectable in the interior view, which
 // moves every other part out of the way. `view` is the horizontal direction the
 // camera looks at a part from, when the default (the way it explodes) is wrong:
-// cockpit parts are seen from the seats.
+// cockpit parts are seen from the seats. A nonzero y sets how high the camera
+// looks from instead of the default.
+//
+// `reveals` names a part that swings open on its `hinge` when this one is
+// selected, for a part hidden under another, such as the frunk under the front
+// lid. A hinge is a pivot point and axis in car space, and how far it opens in
+// radians.
 const wheel = (front, side) => ({
   name: `${front ? 'Front' : 'Rear'} ${side === 1 ? 'right' : 'left'} wheel & tire`,
   bullets: front
@@ -47,7 +53,16 @@ export const PARTS = {
     name: 'Front lid',
     bullets: ['Lightweight aluminum panel', 'Covers the front luggage compartment', 'Recessed center section echoing early 911s'],
     explode: [0.6, 0.9, 0],
+    hinge: { pivot: [-1.52, 0.73, 0], axis: [0, 0, 1], angle: 1.05 },
     shop: { query: 'Porsche 992 Turbo S front hood', match: /hood|bonnet|front lid/i },
+  },
+  frunk: {
+    reveals: 'hood',
+    view: [1, 0.9, 0.35],
+    name: 'Front trunk (frunk)',
+    bullets: ['128-liter luggage compartment under the front lid', 'Carpeted tub between the front wheel arches', 'Warning triangle stowed on the rear wall'],
+    explode: [0, -0.6, 0],
+    shop: { query: 'Porsche 992 front trunk liner', match: /trunk|frunk|luggage|cargo/i },
   },
   roof: {
     name: 'Roof panel',

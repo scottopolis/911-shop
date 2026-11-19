@@ -169,6 +169,165 @@ function partsPerTriangle(prim, matrix, ctx) {
   return Array.from(triIsland, (r) => islandPart.get(r));
 }
 
+// The source has no luggage compartment under the front lid, only an empty
+// space between the bumper, the wheel arch liners and the firewall. This builds
+// a carpeted tub there, its rim just under the lid, with the warning-triangle
+// case on its rear wall.
+function addFrunk() {
+  const FRONT = -0.44; // rim, just behind the bumper
+  const REAR = -1.36; // rim, in front of the firewall
+  const FLOOR = 0.12;
+  // Height of the lid's underside along the car's center line.
+  const LID = [[-0.3, 0.5], [-0.4, 0.55], [-0.5, 0.58], [-0.6, 0.62], [-0.7, 0.64], [-0.8, 0.67], [-0.9, 0.69], [-1.0, 0.71], [-1.1, 0.73], [-1.2, 0.74], [-1.4, 0.74]];
+  const lid = (x) => {
+    for (let i = 1; i < LID.length; i++) {
+      const [x0, y0] = LID[i - 1];
+      const [x1, y1] = LID[i];
+      if (x >= x1) return y0 + ((x - x0) / (x1 - x0)) * (y1 - y0);
+    }
+    return LID[LID.length - 1][1];
+  };
+  const smooth = (a, b, v) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+  // The rim narrows at the front, between the headlights.
+  const halfWidth = (x) => 0.53 - 0.15 * smooth(-0.7, FRONT, x);
+  const cx = (FRONT + REAR) / 2;
+  const a = (FRONT - REAR) / 2;
+
+  // A squarish rim loop, then rings that step down to the floor, shrinking
+  // near the bottom so the walls round into the floor like a molded tub. The
+  // first ring is a flange that tucks under the lid's edges.
+  const N = 64;
+  const RINGS = [-1, 0, 0.15, 0.3, 0.45, 0.6, 0.72, 0.84, 0.93, 1];
+  const pos = [];
+  const uv = [];
+  const add = (x, y, z) => { pos.push(x, y, z); uv.push(z * 2, (x + y) * 2); };
+  for (const t of RINGS) {
+    const scale = t < 0 ? 1.06 : 1 - 0.14 * t ** 3;
+    for (let i = 0; i < N; i++) {
+      const th = (i / N) * Math.PI * 2;
+      const c = Math.cos(th);
+      const s = Math.sin(th);
+      // Superellipse: flat sides with rounded corners.
+      const x = cx + a * Math.sign(c) * Math.abs(c) ** (1 / 3);
+      const z = halfWidth(x) * Math.sign(s) * Math.abs(s) ** (1 / 3);
+      const rimY = lid(x) - 0.035 - 0.04 * (z / 0.53) ** 2;
+      const y = t <= 0 ? rimY : rimY + (FLOOR - rimY) * t;
+      add(cx + (x - cx) * scale, y, z * scale);
+    }
+  }
+  const idx = [];
+  for (let r = 0; r < RINGS.length - 1; r++) {
+    for (let i = 0; i < N; i++) {
+      const p = r * N + i;
+      const q = r * N + ((i + 1) % N);
+      idx.push(p, p + N, q, q, p + N, q + N);
+    }
+  }
+  const center = pos.length / 3;
+  add(cx, FLOOR, 0);
+  const last = (RINGS.length - 1) * N;
+  for (let i = 0; i < N; i++) idx.push(last + i, center, last + ((i + 1) % N));
+
+  const rug = root.listMaterials().find((m) => m.getName() === 'rug_interior');
+  const carpet = rug.clone().setName('frunk_carpet').setDoubleSided(true);
+  partMesh('frunk').addPrimitive(primitive(pos, uv, idx, carpet));
+
+  // A black surround closes the gap between the tub's flange and the edge of
+  // the lid opening, then drops a skirt behind the fenders and bumper. The
+  // opening's outline is the lid's own outline, seen from above: in each
+  // direction from the tub's center, the lid's farthest point and how low its
+  // edge comes there.
+  const BINS = 180;
+  const reach = new Float32Array(BINS);
+  const edgeY = new Float32Array(BINS).fill(Infinity);
+  const bin = (x, z) => Math.floor(((Math.atan2(z, x - cx) / (Math.PI * 2) + 1) % 1) * BINS);
+  for (const prim of partNodes.get('hood').getMesh().listPrimitives()) {
+    const p = prim.getAttribute('POSITION');
+    for (let i = 0; i < p.getCount(); i++) {
+      const [x, y, z] = p.getElement(i, []);
+      const b = bin(x, z);
+      const d = Math.hypot(x - cx, z);
+      if (d > reach[b] + 0.01) edgeY[b] = y;
+      else if (d > reach[b] - 0.01) edgeY[b] = Math.min(edgeY[b], y);
+      reach[b] = Math.max(reach[b], d);
+    }
+  }
+  const SKIRT = 0.12;
+  const lp = [];
+  const lu = [];
+  const li = [];
+  for (let i = 0; i < N; i++) {
+    const [fx, fy, fz] = pos.slice(3 * i, 3 * i + 3); // flange ring
+    const b = bin(fx, fz);
+    const d = Math.hypot(fx - cx, fz);
+    // Stop just inside the lid's edge, so the closed lid hides the seam.
+    const r = Math.max(d, reach[b] - 0.015) / d;
+    const ox = cx + (fx - cx) * r;
+    const oz = fz * r;
+    const oy = Math.min(fy, edgeY[b] - 0.012);
+    for (const [x, y, z] of [[fx, fy, fz], [ox, oy, oz], [ox, oy - SKIRT, oz]]) {
+      lp.push(x, y, z);
+      lu.push(z * 2, x * 2);
+    }
+  }
+  for (let i = 0; i < N; i++) {
+    const j = (i + 1) % N;
+    for (let k = 0; k < 2; k++) {
+      const p = 3 * i + k;
+      const q = 3 * j + k;
+      li.push(p, p + 1, q, q, p + 1, q + 1);
+    }
+  }
+  const plastic = doc.createMaterial('frunk_liner').setBaseColorFactor([0.02, 0.02, 0.022, 1]).setRoughnessFactor(0.7).setMetallicFactor(0).setDoubleSided(true);
+  partMesh('frunk').addPrimitive(primitive(lp, lu, li, plastic));
+
+  // Warning-triangle case, clipped to the rear wall.
+  const red = doc.createMaterial('warning_red').setBaseColorFactor([0.55, 0.02, 0.03, 1]).setRoughnessFactor(0.45).setMetallicFactor(0).setDoubleSided(true);
+  const [bx, by, bz] = [-1.3, 0.4, 0];
+  const [hx, hy, hz] = [0.025, 0.025, 0.2];
+  const bp = [];
+  const bu = [];
+  const bi = [];
+  // Each face: its normal axis k and sign, as four corners.
+  for (const [k, sgn] of [[0, 1], [0, -1], [1, 1], [1, -1], [2, 1], [2, -1]]) {
+    const [u, v] = [0, 1, 2].filter((j) => j !== k);
+    const base = bp.length / 3;
+    for (const [du, dv] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      const p = [0, 0, 0];
+      p[k] = sgn;
+      p[u] = du;
+      p[v] = dv * sgn;
+      bp.push(bx + p[0] * hx, by + p[1] * hy, bz + p[2] * hz);
+      bu.push(du, dv);
+    }
+    bi.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  partMesh('frunk').addPrimitive(primitive(bp, bu, bi, red));
+}
+
+// A triangle primitive from flat arrays, with smooth normals.
+function primitive(pos, uv, idx, material) {
+  const nrm = new Float32Array(pos.length);
+  for (let t = 0; t < idx.length; t += 3) {
+    const [a, b, c] = [idx[t], idx[t + 1], idx[t + 2]].map((i) => pos.slice(3 * i, 3 * i + 3));
+    const e1 = [0, 1, 2].map((k) => b[k] - a[k]);
+    const e2 = [0, 1, 2].map((k) => c[k] - a[k]);
+    const n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+    for (const i of [idx[t], idx[t + 1], idx[t + 2]]) for (let k = 0; k < 3; k++) nrm[3 * i + k] += n[k];
+  }
+  for (let i = 0; i < nrm.length; i += 3) {
+    const l = Math.hypot(nrm[i], nrm[i + 1], nrm[i + 2]) || 1;
+    for (let k = 0; k < 3; k++) nrm[i + k] /= l;
+  }
+  const acc = (type, array) => doc.createAccessor().setType(type).setBuffer(buffer).setArray(array);
+  return doc.createPrimitive()
+    .setAttribute('POSITION', acc('VEC3', new Float32Array(pos)))
+    .setAttribute('NORMAL', acc('VEC3', nrm))
+    .setAttribute('TEXCOORD_0', acc('VEC2', new Float32Array(uv)))
+    .setIndices(acc('SCALAR', new Uint32Array(idx)))
+    .setMaterial(material);
+}
+
 const scene = root.listScenes()[0];
 const car = doc.createNode('car');
 const partNodes = new Map();
@@ -205,6 +364,8 @@ for (const n of sourceNodes) {
     }
   }
 }
+
+addFrunk();
 
 for (const child of scene.listChildren()) scene.removeChild(child);
 scene.addChild(car);
