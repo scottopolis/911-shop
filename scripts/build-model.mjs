@@ -62,13 +62,6 @@ function classify({ node, door, c, s, max }) {
   if (isBody && x > -1.7 && az > 0.4 && s[0] > 1) return `fender_${side}`;
   if (isBody && y > 1.0) return 'roof';
 
-  // The rear spoiler: the body-colored blade across the tail and the third
-  // brake light on it.
-  if (x < -4.15 && y > 0.74 && y < 0.82 && s[0] < 0.35 && s[2] > 0.4 && (isBody || /^reflectors/.test(node))) return 'spoiler';
-  // The pedestal the blade stands on, which rises out of the tail, and the
-  // black arms that lift it.
-  if (isBody && x < -4.15 && y > 0.65 && y < 0.75 && s[0] < 0.4 && s[1] < 0.2 && s[2] > 1.2) return 'spoiler';
-  if (/bl_pl_M_ext/.test(node) && x < -4.14 && y > 0.65 && y < 0.75 && max < 0.35) return 'spoiler';
   if (!isBody && x < -3.9 && y > 0.5 && y < 0.7 && s[1] < 0.15 && /red_light|trans_covers|glossy|reflectors|lights_pattern|logo_all/.test(node)) return 'taillight';
   if (x < -3.95 && y > 0.65 && az < 0.75 && (isBody || /bl_pl_M_ext|black_metal|plastic_exterior|service_black/.test(node))) return 'decklid';
   if (x < -3.7 && y < 0.5 && !/rugs|upholstery|belts/.test(node)) return 'rear_bumper';
@@ -321,33 +314,6 @@ function addFrunk() {
   partMesh('frunk').addPrimitive(primitive(bp, bu, bi, black));
 }
 
-// The source models the spoiler raised: the blade stands on a pedestal that
-// rises out of the tail. The car shows it stowed, flush on the tail with its
-// trailing edge just above the light bar. Squash every point toward the tail's
-// surface, keeping STOWED_HEIGHT of its height above it, then fold it into the
-// engine lid. That surface starts at the light bar's top edge, which sweeps
-// forward toward the car's sides, and rises forward along the engine lid.
-const LIGHT_BAR_TOP = 0.64;
-const DECK_SLOPE = 0.38; // rise per meter forward of the light bar
-const STOWED_HEIGHT = 0.25;
-function stowSpoiler() {
-  // The light bar's top edge, measured at |z| = 0 to 0.7.
-  const edgeX = (z) => -4.44 + 0.24 * (Math.abs(z) / 0.7) ** 3;
-  const floorAt = (x, z) => LIGHT_BAR_TOP + DECK_SLOPE * (x - edgeX(z));
-  const spoiler = partNodes.get('spoiler');
-  for (const prim of spoiler.getMesh().listPrimitives()) {
-    const pos = prim.getAttribute('POSITION');
-    for (let i = 0; i < pos.getCount(); i++) {
-      const [x, y, z] = pos.getElement(i, []);
-      const floor = floorAt(x, z);
-      if (y > floor) pos.setElement(i, [x, floor + (y - floor) * STOWED_HEIGHT, z]);
-    }
-    partMesh('decklid').addPrimitive(prim);
-  }
-  spoiler.dispose();
-  partNodes.delete('spoiler');
-}
-
 // A triangle primitive from flat arrays, with smooth normals.
 function primitive(pos, uv, idx, material) {
   const nrm = new Float32Array(pos.length);
@@ -409,7 +375,6 @@ for (const n of sourceNodes) {
 }
 
 addFrunk();
-stowSpoiler();
 
 for (const child of scene.listChildren()) scene.removeChild(child);
 scene.addChild(car);
