@@ -5,12 +5,15 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { PARTS } from './parts.js';
 import { Callout } from './callout.js';
+import { addDecals } from './decals.js';
 import SHOP_LINKS from './shop-links.json';
 
 const POP_DISTANCE = 0.35; // how far a selected part slides out, in meters
 // Porsche Chalk, a light neutral grey; darker than the real swatch because the studio
 // lighting and tone mapping brighten it.
 const CHALK = new THREE.Color('#7f817e');
+// Guards Red seatbelts, in place of the model's green ones.
+const BELT_RED = new THREE.Color('#a10d16');
 // In the interior view every exterior part flies this far out along its explode
 // direction and fades away, and the body shell fades to a ghost of itself.
 const AWAY_DISTANCE = 3.5;
@@ -248,6 +251,7 @@ loader.load(
         o.castShadow = true;
         o.material = o.material.clone();
         if (o.material.name === 'body_main') o.material.color.copy(CHALK);
+        if (o.material.name === 'belts') o.material.color.copy(BELT_RED);
         const { emissive, opacity, transparent, depthWrite } = o.material;
         materials.push({ material: o.material, emissive: emissive.clone(), opacity, transparent, depthWrite });
         o.userData.partId = id;
@@ -271,6 +275,7 @@ loader.load(
         fade: 1,
       });
     }
+    addDecals(car, (id) => parts.find((p) => p.id === id)?.object);
     parts.sort((a, b) => PARTS[a.id].name.localeCompare(PARTS[b.id].name));
     buildPartList();
     document.getElementById('loading').classList.add('done');
