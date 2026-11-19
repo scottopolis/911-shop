@@ -38,6 +38,10 @@ function classify({ node, door, c, s, max }) {
 
   if (door) return door === 'door_2' ? 'door_l' : 'door_r';
 
+  // The small black backings behind the dash screens and vents are cabin trim,
+  // not body; as body they vanish with it in the interior view and leave holes.
+  if (/invisible_all/.test(node) && max < 0.4 && x > -2.2 && x < -1.2 && y > 0.4 && az < 0.75) node = 'plastic_all';
+
   const hubX = x > -2.3 ? WHEEL_X.front : WHEEL_X.rear;
   const hubDist = Math.hypot(x - hubX, y - HUB_Y);
   if (/^AO_tire|^wheel_rim/.test(node)) return `wheel_${corner(c)}`;
