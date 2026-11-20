@@ -8,10 +8,12 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "shop:links": "node scripts/find-shop-links.mjs",
-    "build:model": "node scripts/build-model.mjs source-models/porsche_911_with_interior.glb public/models/porsche-911.glb"
+    "build:model": "node scripts/build-model.mjs source-models/porsche_911_with_interior.glb public/models/porsche-911.glb",
+    "build:track": "node scripts/build-track.mjs source-models/cougar_circuit_drift_track.glb public/models/track.glb"
   },
   "dependencies": {
-    "three": "^0.187.0"
+    "three": "^0.187.0",
+    "three-mesh-bvh": "^0.9.18"
   },
   "devDependencies": {
     "@gltf-transform/core": "^4.5.1",

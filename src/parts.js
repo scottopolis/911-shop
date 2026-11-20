@@ -26,7 +26,10 @@
 // about 1/15 of the steering wheel's angle; turning right yaws them toward +z.
 const frontSteer = (side) => ({ pivot: [-1.04, 0.19, 0.78 * side], axis: [0, 1, 0], ratio: -1 / 15 });
 
+// `hub` is a point on a wheel's axle, which runs across the car; the wheel
+// rolls about it as the car drives.
 const wheel = (front, side) => ({
+  hub: [front ? -1.04 : -3.49, 0.19, 0.78 * side],
   name: `${front ? 'Front' : 'Rear'} ${side === 1 ? 'right' : 'left'} wheel & tire`,
   bullets: front
     ? ['20-inch Turbo S alloy rim', '255/35 ZR 20 performance tire', 'Center-lock style hub with Porsche crest']
