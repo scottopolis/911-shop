@@ -56,21 +56,35 @@ const LAUNCH = 11;
 const POWER = 250;
 const AIR = 0.0003;
 const ROLLING = 0.15;
-const BRAKE = 14;
+const BRAKE = 22; // about 2.2 g, stronger than the real car's 1.3 g
+// Space is a handbrake: it brakes more gently and leaves the tires only
+// HANDBRAKE_GRIP of their grip, so steering while holding it starts a drift.
+const HANDBRAKE = 10;
+const HANDBRAKE_GRIP = 0.35;
 const COAST = 2.5; // engine braking
 const MAX_REVERSE = 8;
 // The tires hold at most GRIP of sideways acceleration (about 3.5 g, arcade
-// grip well past a road car's, so the car still turns hard at speed); past it the car slides and SCRUB slows it. At speed the front wheels
-// turn only as far as the tires can use, plus LOCK_MARGIN, so full lock swings
-// the tail out a little rather than spinning the car.
+// grip well past a road car's, so the car still turns hard at speed); past it
+// the car slides and SCRUB slows it. At speed the front wheels turn only as far
+// as the tires can use, times a margin: LOCK_MARGIN up to DRIFT_FROM, rising to
+// DRIFT_MARGIN by DRIFT_FULL. So full lock swings the tail out a little when
+// slow and drifts further when fast, rather than spinning the car.
 const GRIP = 34;
 const LOCK_MARGIN = 1.15;
+const DRIFT_MARGIN = 1.4;
+const DRIFT_FROM = 20; // m/s, about 72 km/h
+const DRIFT_FULL = 50; // m/s, about 180 km/h
 const SCRUB = 3;
 const SKID_SLIP = 0.1; // radians of slide that leave skid marks
 // The four tires' contact patches, in car space.
 const TIRES = [-1.04, -3.49].flatMap((x) => [-0.76, 0.76].map((z) => new THREE.Vector3(x, -0.14, z)));
-// How fast the front wheels turn, a sports car's 250 degrees a second.
-const STEER_SPEED = THREE.MathUtils.degToRad(250);
+// The keys turn the front wheels at most KEY_LOCK, about the real car's turning
+// circle, at STEER_IN a second, so full lock takes a third of a second, and
+// straighten them at STEER_OUT. At speed the lock is a few degrees, so the
+// car still answers the keys at once.
+const KEY_LOCK = THREE.MathUtils.degToRad(22);
+const STEER_IN = THREE.MathUtils.degToRad(70);
+const STEER_OUT = THREE.MathUtils.degToRad(180);
 const KEYS = {
   KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down',
   KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', Space: 'brake',
@@ -83,6 +97,11 @@ const DRIVER_FOV = 62;
 const CHASE_BACK = 6.5;
 const CHASE_UP = 2.3;
 const CHASE_FOV = 50;
+// At speed the chase camera widens by up to SPEED_FOV degrees, reached at
+// FOV_SPEED m/s, and closes in halfway, so the car shrinks only a little: the
+// roadside streams past faster, as in racing games.
+const SPEED_FOV = 28;
+const FOV_SPEED = 55;
 
 // What the side panel lists. A part id opens and closes that part's hinge;
 // `flash` blinks the lights when it opens. `interior` items stay listed in the
@@ -177,10 +196,8 @@ let lookYaw = 0; // where the driver looks: right of straight ahead,
 let lookPitch = -0.1; // and above level
 let lookDrag = null; // the pointer's last position while it turns the driver's head
 
-const explodeBtn = document.getElementById('explode-btn');
-const explodeRange = document.getElementById('explode-range');
 const functionList = document.getElementById('function-list');
-const interiorBtn = document.getElementById('interior-btn');
+const help = document.getElementById('help');
 const driverBtn = document.getElementById('driver-btn');
 const chaseBtn = document.getElementById('chase-btn');
 const gauge = createGauge();
@@ -203,8 +220,6 @@ const opener = (part) => {
 
 function setInterior(on) {
   insideTarget = on ? 1 : 0;
-  interiorBtn.textContent = on ? 'Exterior' : 'Interior';
-  interiorBtn.setAttribute('aria-pressed', String(on));
   for (const li of functionList.children) li.hidden = on && !FUNCTIONS[li.dataset.index].interior;
   cameraGoal = home();
 }
@@ -290,7 +305,6 @@ function fade(part, amount) {
 
 function setExplodeTarget(value) {
   explodeTarget = value;
-  explodeBtn.textContent = value > 0.5 ? 'Assemble' : 'Explode';
 }
 
 function tint(part) {
@@ -316,17 +330,19 @@ function drive(dt) {
   const turn = (keys.has('right') ? 1 : 0) - (keys.has('left') ? 1 : 0);
   // A turn key steers to full lock: the wheel's own lock when slow, and at
   // speed the angle whose turn the tires can hold. Let go and it recenters.
-  const grip = Math.atan((WHEELBASE * GRIP * LOCK_MARGIN) / Math.max(speed * speed, 1e-6)) * STEER_RATIO;
-  if (turn) steerTarget = turn * Math.min(MAX_STEER, grip);
+  const margin = THREE.MathUtils.mapLinear(THREE.MathUtils.clamp(Math.abs(speed), DRIFT_FROM, DRIFT_FULL), DRIFT_FROM, DRIFT_FULL, LOCK_MARGIN, DRIFT_MARGIN);
+  const grip = Math.atan((WHEELBASE * GRIP * margin) / Math.max(speed * speed, 1e-6)) * STEER_RATIO;
+  if (turn) steerTarget = turn * Math.min(KEY_LOCK * STEER_RATIO, grip);
   else if (Math.abs(speed) > 0.5 && dragging === null) steerTarget = 0;
-  if (dragging === null) steer = moveToward(steer, steerTarget, STEER_SPEED * STEER_RATIO * dt);
+  const rate = Math.abs(steerTarget) > Math.abs(steer) ? STEER_IN : STEER_OUT;
+  if (dragging === null) steer = moveToward(steer, steerTarget, rate * STEER_RATIO * dt);
 
   // Throttle and brakes act along the way the car points.
   let forward = new THREE.Vector3(Math.cos(heading), 0, -Math.sin(heading));
   speed = velocity.dot(forward);
   let next = speed;
   const resist = AIR * speed * speed + ROLLING;
-  if (keys.has('brake')) next = moveToward(speed, 0, BRAKE * dt);
+  if (keys.has('brake')) next = moveToward(speed, 0, HANDBRAKE * dt);
   // Off the gas, engine braking, air drag and rolling resistance slow the car.
   else if (!throttle) next = moveToward(speed, 0, (COAST + resist) * dt);
   // Pressing against the direction of travel brakes first, then reverses.
@@ -350,7 +366,8 @@ function drive(dt) {
   // GRIP of sideways force. Past that the car slides, scrubbing off speed.
   const aim = velocity.dot(forward) < 0 ? forward.clone().negate() : forward;
   const slip = Math.atan2(velocity.clone().cross(aim).y, velocity.dot(aim));
-  const turned = THREE.MathUtils.clamp(slip, -(GRIP * dt) / moving, (GRIP * dt) / moving);
+  const hold = (keys.has('brake') ? GRIP * HANDBRAKE_GRIP : GRIP) * dt / moving;
+  const turned = THREE.MathUtils.clamp(slip, -hold, hold);
   velocity.applyAxisAngle(THREE.Object3D.DEFAULT_UP, turned);
   const sliding = Math.abs(slip - turned);
   if (sliding > 0.01) velocity.multiplyScalar(Math.max(0, 1 - SCRUB * Math.sin(Math.min(sliding, 1)) * dt / moving));
@@ -612,37 +629,23 @@ canvas.addEventListener('pointermove', (e) => {
   if (part) tint(part);
 });
 
-explodeBtn.addEventListener('click', () => {
-  if (driver) setDriver(false);
-  if (chase) setChase(false);
-  const exploding = explodeTarget <= 0.5;
-  setExplodeTarget(exploding ? 1 : 0);
-  // Pull back so the exploded parts fit in view, and come back in on assemble.
-  const offset = camera.position.clone().sub(controls.target).multiplyScalar(exploding ? 1.4 : 1 / 1.4);
-  cameraGoal = { position: controls.target.clone().add(offset), target: controls.target.clone() };
-});
-interiorBtn.addEventListener('click', () => {
-  if (driver) setDriver(false);
-  if (chase) setChase(false);
-  setInterior(insideTarget < 0.5);
-});
 driverBtn.addEventListener('click', () => setDriver(!driver));
 chaseBtn.addEventListener('click', () => setChase(!chase));
-explodeRange.addEventListener('input', () => {
-  if (driver) setDriver(false);
-  setExplodeTarget(Number(explodeRange.value));
-});
+// The controls card shows until the first driving key or its button.
+document.getElementById('help-close').addEventListener('click', () => (help.hidden = true));
+document.getElementById('help-btn').addEventListener('click', () => (help.hidden = !help.hidden));
 // Back to how the page starts: parked in the pits, seen from the chase camera.
 document.getElementById('reset-btn').addEventListener('click', () => {
   park();
   setChase(true);
 });
 
-// The keys drive the car, except while typing in a control such as the slider.
+// The keys drive the car.
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'KeyC' && !e.repeat && !(e.target instanceof HTMLInputElement)) setChase(!chase);
-  if (!KEYS[e.code] || e.target instanceof HTMLInputElement) return;
+  if (e.code === 'KeyC' && !e.repeat) setChase(!chase);
+  if (!KEYS[e.code]) return;
   e.preventDefault();
+  help.hidden = true;
   keys.add(KEYS[e.code]);
 });
 window.addEventListener('keyup', (e) => keys.delete(KEYS[e.code]));
@@ -670,7 +673,6 @@ renderer.setAnimationLoop(() => {
   const k = 1 - Math.exp(-dt * 6);
 
   explode += (explodeTarget - explode) * k;
-  if (document.activeElement !== explodeRange) explodeRange.value = explode.toFixed(2);
 
   inside += (insideTarget - inside) * k;
   if (Math.abs(insideTarget - inside) < 0.001) inside = insideTarget;
@@ -740,7 +742,10 @@ renderer.setAnimationLoop(() => {
     const aim = speed > 3 ? Math.atan2(-velocity.z, velocity.x) : heading;
     chaseYaw += Math.atan2(Math.sin(aim - chaseYaw), Math.cos(aim - chaseYaw)) * (1 - Math.exp(-dt * 3));
     const back = new THREE.Vector3(-Math.cos(chaseYaw), 0, Math.sin(chaseYaw));
-    camera.position.copy(rig.position).addScaledVector(back, CHASE_BACK).add(new THREE.Vector3(0, CHASE_UP, 0));
+    camera.fov = CHASE_FOV + SPEED_FOV * Math.min(1, velocity.length() / FOV_SPEED);
+    camera.updateProjectionMatrix();
+    const zoom = Math.tan(THREE.MathUtils.degToRad(CHASE_FOV / 2)) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    camera.position.copy(rig.position).addScaledVector(back, CHASE_BACK * (0.5 + 0.5 * zoom)).add(new THREE.Vector3(0, CHASE_UP, 0));
     controls.target.copy(rig.position).addScaledVector(back, -3).add(new THREE.Vector3(0, 0.8, 0));
     camera.lookAt(controls.target);
   } else {
