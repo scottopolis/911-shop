@@ -23,6 +23,7 @@
       <button id="driver-btn" type="button" class="ghost" aria-pressed="false">Driver</button>
       <button id="chase-btn" type="button" class="ghost" aria-pressed="false">Chase cam</button>
       <button id="reset-btn" type="button" class="ghost">Reset</button>
+      <button id="sound-btn" type="button" class="ghost" aria-pressed="true">Sound on</button>
       <button id="help-btn" type="button" class="ghost">Controls</button>
     </div>
 
@@ -34,10 +35,18 @@
         <dt><kbd>A</kbd> <kbd>D</kbd> <kbd>←</kbd> <kbd>→</kbd></dt><dd>Steer</dd>
         <dt><kbd>Space</kbd></dt><dd>Handbrake: brake, or steer to drift</dd>
         <dt><kbd>C</kbd></dt><dd>Chase cam or orbit view</dd>
+        <dt><kbd>R</kbd></dt><dd>Reset the car</dd>
+        <dt><kbd>M</kbd></dt><dd>Sound on or off</dd>
         <dt>Click</dt><dd>Open doors and the front lid</dd>
       </dl>
       <button id="help-close" type="button">Start driving</button>
       <p>Or just press a driving key.</p>
+    </section>
+
+    <section id="wrecked" class="help" aria-labelledby="wrecked-title" hidden>
+      <h2 id="wrecked-title">Wrecked</h2>
+      <button id="wreck-reset" type="button">Reset the car</button>
+      <p>Or press R.</p>
     </section>
 
     <div id="loading" class="loading"><span id="loading-text">Loading model…</span></div>

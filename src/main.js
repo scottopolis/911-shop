@@ -8,6 +8,8 @@ import { PARTS } from './parts.js';
 import { addDecals } from './decals.js';
 import { createContactShadow, createGround, createSkidMarks } from './ground.js';
 import { createGauge } from './gauge.js';
+import { createDamage } from './damage.js';
+import { mute } from './sound.js';
 
 // Porsche Chalk, a light neutral grey; darker than the real swatch because the studio
 // lighting and tone mapping brighten it.
@@ -202,6 +204,28 @@ const driverBtn = document.getElementById('driver-btn');
 const chaseBtn = document.getElementById('chase-btn');
 const gauge = createGauge();
 document.body.append(gauge.element);
+const wreckedCard = document.getElementById('wrecked');
+// When the damage meter fills, the car explodes and can no longer drive.
+const soundBtn = document.getElementById('sound-btn');
+let muted = false;
+function setMuted(on) {
+  muted = on;
+  mute(on);
+  soundBtn.textContent = on ? 'Sound off' : 'Sound on';
+  soundBtn.setAttribute('aria-pressed', String(!on));
+}
+soundBtn.addEventListener('click', () => setMuted(!muted));
+const damage = createDamage(scene, {
+  onWreck: () => {
+    velocity.set(0, 0, 0);
+    speed = 0;
+    keys.clear();
+    skids.lift();
+    // Let the explosion play out before offering a reset.
+    setTimeout(() => (wreckedCard.hidden = !damage.wrecked), 3000);
+  },
+});
+document.body.append(damage.element);
 
 // Where the camera rests for the current view, following the car.
 function home() {
@@ -271,6 +295,8 @@ function setChase(on) {
 
 // Brings the car back to its pit box, stopped.
 function park() {
+  damage.reset();
+  wreckedCard.hidden = true;
   speed = 0;
   velocity.set(0, 0, 0);
   skids.clear();
@@ -383,7 +409,10 @@ function drive(dt) {
   if (normal && Math.abs(normal.y) < 0.7) {
     normal.setY(0).normalize();
     const into = velocity.dot(normal);
-    if (into < 0) velocity.addScaledVector(normal, -1.3 * into).multiplyScalar(0.7);
+    if (into < 0) {
+      damage.hit(wall.point, normal, -into);
+      velocity.addScaledVector(normal, -1.3 * into).multiplyScalar(0.7);
+    }
   }
 
   // The car follows the track's rises and dips, nose up or down with the
@@ -528,6 +557,7 @@ loader.load(
       partById[id] = part;
     }
     addDecals(car, (id) => partById[id]?.object);
+    damage.setCar({ rig, car, parts });
     buildFunctionList();
     document.getElementById('loading').classList.add('done');
   },
@@ -632,6 +662,7 @@ canvas.addEventListener('pointermove', (e) => {
 driverBtn.addEventListener('click', () => setDriver(!driver));
 chaseBtn.addEventListener('click', () => setChase(!chase));
 // The controls card shows until the first driving key or its button.
+document.getElementById('wreck-reset').addEventListener('click', () => document.getElementById('reset-btn').click());
 document.getElementById('help-close').addEventListener('click', () => (help.hidden = true));
 document.getElementById('help-btn').addEventListener('click', () => (help.hidden = !help.hidden));
 // Back to how the page starts: parked in the pits, seen from the chase camera.
@@ -643,6 +674,8 @@ document.getElementById('reset-btn').addEventListener('click', () => {
 // The keys drive the car.
 window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyC' && !e.repeat) setChase(!chase);
+  if (e.code === 'KeyR' && !e.repeat) document.getElementById('reset-btn').click();
+  if (e.code === 'KeyM' && !e.repeat) setMuted(!muted);
   if (!KEYS[e.code]) return;
   e.preventDefault();
   help.hidden = true;
@@ -679,7 +712,7 @@ renderer.setAnimationLoop(() => {
 
   // The orbit camera keeps its angle and travels along with the car.
   const before = rig ? rig.position.clone() : null;
-  if (rig) drive(dt);
+  if (rig && !damage.wrecked) drive(dt);
   if (before) {
     const moved = rig.position.clone().sub(before);
     camera.position.add(moved);
@@ -695,6 +728,7 @@ renderer.setAnimationLoop(() => {
 
 
   for (const part of parts) {
+    if (part.flung) continue; // thrown clear by the explosion
     part.openAmount += (part.openTarget - part.openAmount) * k;
     part.object.position.copy(part.rest);
     part.object.quaternion.copy(part.restQuaternion);
@@ -751,6 +785,7 @@ renderer.setAnimationLoop(() => {
   } else {
     controls.update();
   }
+  damage.update(dt, camera);
   renderer.render(scene, camera);
 });
 

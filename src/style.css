@@ -88,3 +88,14 @@ html, body {
 .gauge .speed { font-size: 24px; font-weight: 700; fill: #f2f2f2; }
 .gauge .unit { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; fill: #9a9ca0; }
 @media (max-width: 800px) { .gauge { width: 130px; height: 130px; right: 12px; } }
+
+/* The damage meter, bottom left. */
+.damage {
+  position: fixed; left: 28px; bottom: 96px; width: 220px; box-sizing: border-box;
+  display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center;
+  padding: 10px 14px; border-radius: 12px; background: rgba(17, 17, 17, 0.82); color: #f2f2f2;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; pointer-events: none;
+}
+.damage-bar { height: 8px; border-radius: 4px; background: #3a3a3a; overflow: hidden; }
+.damage-bar i { display: block; height: 100%; width: 0; background: #3fb950; transition: width 0.3s, background 0.3s; }
+.damage b { min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
