@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <title>Porsche 911 Turbo S (992) — Parts Explorer</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
@@ -22,6 +22,7 @@
     <div class="controls">
       <button id="driver-btn" type="button" class="ghost" aria-pressed="false">Driver</button>
       <button id="chase-btn" type="button" class="ghost" aria-pressed="false">Chase cam</button>
+      <button id="night-btn" type="button" class="ghost" aria-pressed="false">Night</button>
       <button id="reset-btn" type="button" class="ghost">Reset</button>
       <button id="sound-btn" type="button" class="ghost" aria-pressed="true">Sound on</button>
       <button id="help-btn" type="button" class="ghost">Controls</button>
@@ -29,7 +30,13 @@
 
     <section id="help" class="help" aria-labelledby="help-title">
       <h2 id="help-title">Drive out of the pits</h2>
-      <dl>
+      <dl class="touch-help">
+        <dt><kbd>Gas</kbd> <kbd>Brake</kbd></dt><dd>Accelerate; brake, then reverse</dd>
+        <dt><kbd>◀</kbd> <kbd>▶</kbd></dt><dd>Steer</dd>
+        <dt><kbd>Handbrake</kbd></dt><dd>Brake, or steer to drift</dd>
+        <dt>Tap</dt><dd>Open doors and the front lid</dd>
+      </dl>
+      <dl class="key-help">
         <dt><kbd>W</kbd> <kbd>↑</kbd></dt><dd>Accelerate</dd>
         <dt><kbd>S</kbd> <kbd>↓</kbd></dt><dd>Brake, then reverse</dd>
         <dt><kbd>A</kbd> <kbd>D</kbd> <kbd>←</kbd> <kbd>→</kbd></dt><dd>Steer</dd>
@@ -37,10 +44,15 @@
         <dt><kbd>C</kbd></dt><dd>Chase cam or orbit view</dd>
         <dt><kbd>R</kbd></dt><dd>Reset the car</dd>
         <dt><kbd>M</kbd></dt><dd>Sound on or off</dd>
+        <dt><kbd>N</kbd></dt><dd>Day or night</dd>
         <dt>Click</dt><dd>Open doors and the front lid</dd>
       </dl>
+      <div class="paint">
+        <div id="paints" class="swatches" role="group" aria-label="Paint"></div>
+        <span id="paint-name" class="paint-name"></span>
+      </div>
       <button id="help-close" type="button">Start driving</button>
-      <p>Or just press a driving key.</p>
+      <p class="key-help">Or just press a driving key.</p>
     </section>
 
     <section id="wrecked" class="help" aria-labelledby="wrecked-title" hidden>
@@ -48,6 +60,8 @@
       <button id="wreck-reset" type="button">Reset the car</button>
       <p>Or press R.</p>
     </section>
+
+    <div class="rotate">Turn your phone sideways to drive</div>
 
     <div id="loading" class="loading"><span id="loading-text">Loading model…</span></div>
 

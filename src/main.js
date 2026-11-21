@@ -9,11 +9,31 @@ import { addDecals } from './decals.js';
 import { createContactShadow, createGround, createSkidMarks } from './ground.js';
 import { createGauge } from './gauge.js';
 import { createDamage } from './damage.js';
-import { mute } from './sound.js';
+import { createCluster } from './cluster.js';
+import { mute, play } from './sound.js';
+import { createDriveSound } from './drive-sound.js';
+import { createLamps } from './lamps.js';
+import { addTouchControls } from './touch.js';
 
-// Porsche Chalk, a light neutral grey; darker than the real swatch because the studio
-// lighting and tone mapping brighten it.
-const CHALK = new THREE.Color('#7f817e');
+// Porsche paints offered on the start card, as their swatches look. The car is
+// painted darker, by PAINT_SHADE, because the studio lighting and tone mapping
+// brighten it. Its base layer reflects only PAINT_SPECULAR, leaving the gloss to
+// the clear coat, so the bright environment does not wash colors out to pastel.
+const PAINTS = [
+  ['Chalk', '#bdbfba'],
+  ['Guards Red', '#c4161c'],
+  ['Racing Yellow', '#f2c80f'],
+  ['Python Green', '#4f9d3a'],
+  ['Gentian Blue', '#1f3b8a'],
+  ['GT Silver', '#a3a6aa'],
+  ['Carrara White', '#eceeea'],
+  ['Jet Black', '#17191c'],
+];
+const PAINT_SHADE = 0.3;
+const PAINT_SPECULAR = 0.25;
+const paintColor = (swatch) => new THREE.Color(swatch).multiplyScalar(PAINT_SHADE);
+let paint = PAINTS.find(([name]) => name === localStorage.getItem('paint')) ?? PAINTS[0];
+const bodyMaterials = []; // every clone of the painted body material
 // Guards Red seatbelts, in place of the model's green ones.
 const BELT_RED = new THREE.Color('#a10d16');
 // In the interior view every exterior part flies this far out along its explode
@@ -24,17 +44,10 @@ const GHOST_OPACITY = 0.1;
 const HOVER_COLOR = new THREE.Color(0x3b82f6).multiplyScalar(0.015);
 // The steering wheel turns up to 1.25 turns each way, about the real car's lock.
 const MAX_STEER = Math.PI * 2.5;
-// When a door or the front lid opens, the lights blink twice: on for FLASH_ON
-// seconds, off as long, then on again.
-const FLASH_ON = 0.18;
-const FLASH_BLINKS = 2;
-// The materials that light up in each lamp, and their color when lit.
-const LAMPS = {
-  headlight_l: new THREE.Color(1, 0.96, 0.9),
-  headlight_r: new THREE.Color(1, 0.96, 0.9),
-  taillight: new THREE.Color(1, 0.02, 0.02),
-};
-const LAMP_MATERIAL = /lights|pattern|grid|red_light/;
+// Night: the sun becomes a faint blue moon, the sky and haze go dark and the
+// studio reflections dim, so the car's own lamps light the track.
+const DAY = { sun: 1.6, sky: 0.6, environment: 1, haze: new THREE.Color(0xd3dae0) };
+const NIGHT = { sun: 0.12, sky: 0.06, environment: 0.12, haze: new THREE.Color(0x0a0f1a) };
 
 // Driving. The car turns about its rear axle like a bicycle, its front wheels
 // at the steering wheel's angle over STEER_RATIO (the ratio in src/parts.js).
@@ -151,7 +164,10 @@ sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: 1, far: 20 });
 sun.shadow.radius = 6;
-scene.add(sun, sun.target, new THREE.HemisphereLight(0xffffff, 0x777777, 0.6));
+const sky = new THREE.HemisphereLight(0xffffff, 0x777777, DAY.sky);
+scene.add(sun, sun.target, sky);
+const lamps = createLamps();
+const driveSound = createDriveSound();
 
 const ground = createGround(renderer);
 const skids = createSkidMarks();
@@ -166,7 +182,6 @@ ray.firstHitOnly = true;
 // materials to tint when it is hovered.
 const parts = [];
 const partById = {};
-const lampMaterials = [];
 let explode = 0;
 let explodeTarget = 0;
 let hovered = null;
@@ -177,8 +192,9 @@ let insideTarget = 0;
 let steer = 0; // steering wheel angle in radians, positive turns right
 let steerTarget = 0;
 let dragging = null; // the pointer's last angle around the wheel's hub while it turns the wheel
-let flashStart = -Infinity;
-let flashLevel = 0;
+let braking = false; // the brakes or the handbrake are slowing the car
+let slide = 0; // how far, in radians, the car travels off the way its tires point
+let night = false;
 // The car drives by moving `rig`, the loaded scene that holds it. HOME and
 // INTERIOR_HOME are in rig space, so they follow the car.
 let rig = null;
@@ -197,11 +213,13 @@ let pitch = 0; // the car's nose up the slope under it, in radians
 let lookYaw = 0; // where the driver looks: right of straight ahead,
 let lookPitch = -0.1; // and above level
 let lookDrag = null; // the pointer's last position while it turns the driver's head
+let cluster = null; // the moving gauges on the dashboard
 
 const functionList = document.getElementById('function-list');
 const help = document.getElementById('help');
 const driverBtn = document.getElementById('driver-btn');
 const chaseBtn = document.getElementById('chase-btn');
+const nightBtn = document.getElementById('night-btn');
 const gauge = createGauge();
 document.body.append(gauge.element);
 const wreckedCard = document.getElementById('wrecked');
@@ -340,12 +358,29 @@ function tint(part) {
 
 function toggle(part) {
   part.openTarget = part.openTarget ? 0 : 1;
-  if (part.openTarget && FUNCTIONS.find((f) => f.id === part.id)?.flash) flash();
+  const f = FUNCTIONS.find((f) => f.id === part.id);
+  if (part.openTarget && f?.flash) flash();
+  // A door or the lid unlatches as it opens and shuts once it swings closed.
+  if (f?.flash) {
+    if (part.openTarget) play('door-open.mp3', 0.8, part.id === 'hood' ? 1.15 : 1);
+    part.shutting = !part.openTarget;
+  }
   updateFunctionList();
 }
 
 function flash() {
-  flashStart = performance.now() / 1000;
+  lamps.flash();
+}
+
+function setNight(on) {
+  night = on;
+  const look = on ? NIGHT : DAY;
+  sun.intensity = look.sun;
+  sky.intensity = look.sky;
+  scene.environmentIntensity = look.environment;
+  scene.fog.color.copy(look.haze);
+  document.body.classList.toggle('night', on);
+  nightBtn.setAttribute('aria-pressed', String(on));
 }
 
 const moveToward = (value, target, step) => (value < target ? Math.min(target, value + step) : Math.max(target, value - step));
@@ -377,6 +412,8 @@ function drive(dt) {
   next = Math.max(next, -MAX_REVERSE);
   velocity.addScaledVector(forward, next - speed);
   const moving = velocity.length();
+  braking = moving > 0.3 && (keys.has('brake') || throttle * speed < 0);
+  slide = 0;
   if (moving < 0.01 && !throttle) {
     velocity.set(0, 0, 0);
     speed = 0;
@@ -396,6 +433,7 @@ function drive(dt) {
   const turned = THREE.MathUtils.clamp(slip, -hold, hold);
   velocity.applyAxisAngle(THREE.Object3D.DEFAULT_UP, turned);
   const sliding = Math.abs(slip - turned);
+  slide = sliding;
   if (sliding > 0.01) velocity.multiplyScalar(Math.max(0, 1 - SCRUB * Math.sin(Math.min(sliding, 1)) * dt / moving));
   speed = velocity.dot(forward);
 
@@ -526,13 +564,14 @@ loader.load(
         if (!o.isMesh) return;
         o.castShadow = true;
         o.material = o.material.clone();
-        if (o.material.name === 'body_main') o.material.color.copy(CHALK);
+        if (o.material.name === 'body_main') {
+          o.material.color.copy(paintColor(paint[1]));
+          o.material.specularIntensity = PAINT_SPECULAR;
+          bodyMaterials.push(o.material);
+        }
         if (o.material.name === 'belts') o.material.color.copy(BELT_RED);
         const { emissive, opacity, transparent, depthWrite } = o.material;
         materials.push({ material: o.material, emissive: emissive.clone(), opacity, transparent, depthWrite });
-        if (LAMPS[id] && LAMP_MATERIAL.test(o.material.name)) {
-          lampMaterials.push({ material: o.material, color: LAMPS[id], emissive: emissive.clone(), intensity: o.material.emissiveIntensity });
-        }
         o.userData.partId = id;
       });
       const offset = new THREE.Vector3(...info.explode);
@@ -556,8 +595,9 @@ loader.load(
       parts.push(part);
       partById[id] = part;
     }
-    addDecals(car, (id) => partById[id]?.object);
+    cluster = createCluster(car, addDecals(car, (id) => partById[id]?.object));
     damage.setCar({ rig, car, parts });
+    lamps.setCar(car, parts);
     buildFunctionList();
     document.getElementById('loading').classList.add('done');
   },
@@ -661,9 +701,33 @@ canvas.addEventListener('pointermove', (e) => {
 
 driverBtn.addEventListener('click', () => setDriver(!driver));
 chaseBtn.addEventListener('click', () => setChase(!chase));
+nightBtn.addEventListener('click', () => setNight(!night));
+addTouchControls(keys, () => (help.hidden = true));
 // The controls card shows until the first driving key or its button.
 document.getElementById('wreck-reset').addEventListener('click', () => document.getElementById('reset-btn').click());
 document.getElementById('help-close').addEventListener('click', () => (help.hidden = true));
+
+// Paint swatches on the start card; the choice is kept for the next visit.
+const paintName = document.getElementById('paint-name');
+const swatches = PAINTS.map(([name, swatch]) => {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'swatch';
+  button.title = name;
+  button.setAttribute('aria-label', name);
+  button.style.background = swatch;
+  button.addEventListener('click', () => setPaint(PAINTS.find((p) => p[0] === name)));
+  document.getElementById('paints').append(button);
+  return button;
+});
+function setPaint(next) {
+  paint = next;
+  localStorage.setItem('paint', paint[0]);
+  paintName.textContent = paint[0];
+  swatches.forEach((b, i) => b.setAttribute('aria-pressed', String(PAINTS[i] === paint)));
+  damage.repaint(bodyMaterials, paintColor(paint[1]));
+}
+setPaint(paint);
 document.getElementById('help-btn').addEventListener('click', () => (help.hidden = !help.hidden));
 // Back to how the page starts: parked in the pits, seen from the chase camera.
 document.getElementById('reset-btn').addEventListener('click', () => {
@@ -676,6 +740,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyC' && !e.repeat) setChase(!chase);
   if (e.code === 'KeyR' && !e.repeat) document.getElementById('reset-btn').click();
   if (e.code === 'KeyM' && !e.repeat) setMuted(!muted);
+  if (e.code === 'KeyN' && !e.repeat) setNight(!night);
   if (!KEYS[e.code]) return;
   e.preventDefault();
   help.hidden = true;
@@ -725,11 +790,18 @@ renderer.setAnimationLoop(() => {
   }
   updateFunctionList();
   if (chase) gauge.set(velocity.length() * 2.237);
+  cluster?.update(dt, { speed, throttle: keys.has('up'), running: !damage.wrecked });
+  lamps.update(dt, { night, braking: braking && !damage.wrecked, running: !damage.wrecked });
+  driveSound.update({ speed: damage.wrecked ? 0 : velocity.length(), slide: damage.wrecked ? 0 : slide });
 
 
   for (const part of parts) {
     if (part.flung) continue; // thrown clear by the explosion
     part.openAmount += (part.openTarget - part.openAmount) * k;
+    if (part.shutting && part.openAmount < 0.04) {
+      part.shutting = false;
+      play('door-close.mp3', 0.9, part.id === 'hood' ? 1.1 : 1);
+    }
     part.object.position.copy(part.rest);
     part.object.quaternion.copy(part.restQuaternion);
     if (part.hinge) swing(part, part.hinge, part.hinge.angle * part.openAmount);
@@ -739,18 +811,6 @@ renderer.setAnimationLoop(() => {
     if (part.interior) continue;
     part.object.position.addScaledVector(part.away, inside);
     fade(part, part.id === 'body' ? 1 - (1 - GHOST_OPACITY) * inside : 1 - inside);
-  }
-
-  // The lamps follow the blink pattern, easing on and off over a few frames.
-  const t = performance.now() / 1000 - flashStart;
-  const lit = t < FLASH_ON * (2 * FLASH_BLINKS - 1) && Math.floor(t / FLASH_ON) % 2 === 0 ? 1 : 0;
-  if (flashLevel !== lit) {
-    flashLevel += (lit - flashLevel) * (1 - Math.exp(-dt * 40));
-    if (Math.abs(lit - flashLevel) < 1e-3) flashLevel = lit;
-    for (const m of lampMaterials) {
-      m.material.emissive.copy(m.emissive).lerp(m.color, flashLevel);
-      m.material.emissiveIntensity = m.intensity * (1 + 7 * flashLevel);
-    }
   }
 
   if (cameraGoal) {
@@ -803,6 +863,7 @@ window.viewer = {
   toggle: (id) => toggle(partById[id]),
   steer: (radians) => { steerTarget = radians; updateFunctionList(); },
   flash,
+  night: setNight,
   interior: setInterior,
   driver: setDriver,
   chase: setChase,

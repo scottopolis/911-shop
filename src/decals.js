@@ -9,8 +9,8 @@ import * as THREE from 'three';
 // crest pressed into the leather.
 const SCREENS = [
   { part: 'dashboard', draw: drawMap, center: [-1.836, 0.651, 0.034], facing: [-1, 0.05, 0], size: [0.305, 0.108] },
-  { part: 'instrument_cluster', draw: drawSpeedometer, center: [-1.8203, 0.6903, -0.4655], facing: [-0.9428, 0.0991, 0.3182], size: [0.19, 0.118] },
-  { part: 'instrument_cluster', draw: drawBoost, center: [-1.8203, 0.6903, -0.2145], facing: [-0.9428, 0.0991, -0.3182], size: [0.19, 0.118] },
+  { part: 'instrument_cluster', live: true, draw: drawSpeedometer, center: [-1.8203, 0.6903, -0.4655], facing: [-0.9428, 0.0991, 0.3182], size: [0.19, 0.118] },
+  { part: 'instrument_cluster', live: true, draw: drawBoost, center: [-1.8203, 0.6903, -0.2145], facing: [-0.9428, 0.0991, -0.3182], size: [0.19, 0.118] },
 ];
 const CRESTS = [
   { part: 'seat_l', center: [-2.756, 0.86, -0.335], facing: [1, 0.05, 0], size: [0.056, 0.07] },
@@ -20,18 +20,22 @@ const PX_PER_M = 3600;
 const GAP = 0.004; // how far in front of the surface a decal floats
 
 // Adds the decals to the car. `partObject(id)` returns a part's object, so a
-// decal moves with its part when the part explodes or slides out.
+// decal moves with its part when the part explodes or slides out. Returns a
+// function that redraws the live cluster screens with new readings:
+// { mph, boost, miles, gear }.
 export function addDecals(car, partObject) {
   car.updateMatrixWorld(true);
+  const live = [];
   for (const s of SCREENS) {
     const [w, h] = s.size;
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(w * PX_PER_M);
     canvas.height = Math.round(h * PX_PER_M);
-    s.draw(canvas.getContext('2d'), canvas.width, canvas.height);
+    s.draw(canvas.getContext('2d'), canvas.width, canvas.height, READY);
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = 8;
+    if (s.live) live.push({ draw: s.draw, canvas, texture });
     // Unlit and not tone mapped, so the screens glow like displays.
     mount(car, partObject(s.part), s, new THREE.MeshBasicMaterial({ map: texture, toneMapped: false }));
   }
@@ -44,7 +48,17 @@ export function addDecals(car, partObject) {
     color: 0x2a2a2a, roughness: 0.45, alphaMap: mask, bumpMap: mask, bumpScale: 2, transparent: true, depthWrite: false,
   });
   for (const c of CRESTS) mount(car, partObject(c.part), c, leather);
+
+  return (readings) => {
+    for (const { draw, canvas, texture } of live) {
+      draw(canvas.getContext('2d'), canvas.width, canvas.height, readings);
+      texture.needsUpdate = true;
+    }
+  };
 }
+
+// What the cluster shows parked, before the first update.
+const READY = { mph: 0, boost: 0, miles: 8412, gear: '1' };
 
 function mount(car, object, { part, center, facing, size }, material) {
   if (!object) return;
@@ -212,13 +226,13 @@ function displayBackground(g, w, h) {
 }
 
 // Left of the tach: the speedometer, with the digital speed and odometer.
-function drawSpeedometer(g, w, h) {
+function drawSpeedometer(g, w, h, { mph, miles, gear }) {
   displayBackground(g, w, h);
-  dial(g, w * 0.6, h * 0.5, h * 0.4, { max: 200, step: 40, value: 72, arc: 'rgba(148, 163, 184, 0.7)' });
+  dial(g, w * 0.6, h * 0.5, h * 0.4, { max: 200, step: 40, value: Math.min(mph, 200), arc: 'rgba(148, 163, 184, 0.7)' });
   g.textAlign = 'center';
   g.fillStyle = '#ffffff';
   g.font = `700 ${h * 0.12}px Helvetica, Arial, sans-serif`;
-  g.fillText('72', w * 0.6, h * 0.72);
+  g.fillText(String(Math.round(mph)), w * 0.6, h * 0.72);
   g.font = `500 ${h * 0.05}px Helvetica, Arial, sans-serif`;
   g.fillStyle = '#9ca3af';
   g.fillText('mph', w * 0.6, h * 0.8);
@@ -226,18 +240,23 @@ function drawSpeedometer(g, w, h) {
   g.font = `500 ${h * 0.06}px Helvetica, Arial, sans-serif`;
   g.fillStyle = '#d1d5db';
   g.fillText('NORMAL', w * 0.06, h * 0.2);
-  g.fillText('8 412 mi', w * 0.06, h * 0.82);
+  g.fillText(`${Math.floor(miles).toLocaleString('en-US').replace(',', ' ')} mi`, w * 0.06, h * 0.82);
+  g.font = `700 ${h * 0.14}px Helvetica, Arial, sans-serif`;
+  g.fillStyle = '#ffffff';
+  g.fillText(gear, w * 0.06, h * 0.42);
+  g.font = `500 ${h * 0.06}px Helvetica, Arial, sans-serif`;
+  g.fillStyle = '#d1d5db';
   g.fillText('73°F', w * 0.06, h * 0.9);
 }
 
 // Right of the tach: boost pressure in orange, with range and trip data.
-function drawBoost(g, w, h) {
+function drawBoost(g, w, h, { boost }) {
   displayBackground(g, w, h);
-  dial(g, w * 0.4, h * 0.5, h * 0.4, { max: 2, step: 0.5, value: 1.3, arc: '#f97316' });
+  dial(g, w * 0.4, h * 0.5, h * 0.4, { max: 2, step: 0.5, value: boost, arc: '#f97316' });
   g.textAlign = 'center';
   g.fillStyle = '#ffffff';
   g.font = `700 ${h * 0.1}px Helvetica, Arial, sans-serif`;
-  g.fillText('1.3', w * 0.4, h * 0.72);
+  g.fillText(boost.toFixed(1), w * 0.4, h * 0.72);
   g.font = `500 ${h * 0.05}px Helvetica, Arial, sans-serif`;
   g.fillStyle = '#9ca3af';
   g.fillText('bar', w * 0.4, h * 0.8);

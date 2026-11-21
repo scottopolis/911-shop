@@ -291,9 +291,18 @@ export function createDamage(scene, { onWreck }) {
     for (const [material, color] of paints) material.color.copy(color);
   }
 
+  // Gives `materials` a new paint `color`, kept for restoring after a wreck.
+  function repaint(materials, color) {
+    for (const material of materials) {
+      paints.set(material, color.clone());
+      material.color.copy(color).lerp(CHAR, burn);
+    }
+  }
+
   return {
     element: meter.element,
     setCar,
+    repaint,
     hit,
     update,
     reset,

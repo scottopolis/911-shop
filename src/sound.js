@@ -39,6 +39,12 @@ export function play(file, gain, rate = 1) {
   });
 }
 
+// Looping sounds play without a click or key of their own, so the first
+// gesture anywhere wakes the context. iOS counts only some events as gestures.
+for (const type of ['keydown', 'pointerup', 'touchend', 'click']) {
+  window.addEventListener(type, () => audio().resume(), { capture: true });
+}
+
 export function mute(muted) {
   output().gain.value = muted ? 0 : 1;
 }

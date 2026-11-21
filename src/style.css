@@ -68,6 +68,14 @@ html, body {
 }
 .help button:hover { opacity: 0.85; }
 .help p { margin: 10px 0 0; font-size: 12px; color: #999; }
+.help .paint { margin: 0 0 20px; }
+.help .swatches { display: flex; justify-content: center; gap: 8px; }
+.help .swatch {
+  width: 26px; height: 26px; padding: 0; border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+.help .swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px #111, 0 0 0 4px #f2f2f2; }
+.help .paint-name { display: block; margin-top: 8px; font-size: 12px; color: #bbb; }
 
 .loading {
   position: fixed; inset: 0; display: grid; place-items: center;
@@ -99,3 +107,61 @@ html, body {
 .damage-bar { height: 8px; border-radius: 4px; background: #3a3a3a; overflow: hidden; }
 .damage-bar i { display: block; height: 100%; width: 0; background: #3fb950; transition: width 0.3s, background 0.3s; }
 .damage b { min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* At night the dark sky needs light text. */
+body.night .brand h1 { color: #f2f2f2; }
+body.night .brand p { color: #9aa3b2; }
+
+/* Touch screens: steering and pedals under the thumbs, a compact bar on top,
+   and the gauges moved out of the thumbs' way. The touch controls and their
+   help show only here; the key list only elsewhere. */
+.touch, .help .touch-help, .rotate { display: none; }
+@media (hover: none) and (pointer: coarse) {
+  .help .touch-help { display: grid; }
+  .help .key-help { display: none; }
+  .functions, .brand p { display: none; }
+  .brand { top: max(10px, env(safe-area-inset-top)); left: max(14px, env(safe-area-inset-left)); }
+  .brand h1 { font-size: 16px; }
+
+  .controls {
+    top: max(8px, env(safe-area-inset-top)); bottom: auto; gap: 4px; padding: 4px;
+  }
+  .controls button { min-width: 0; padding: 7px 11px; font-size: 12px; }
+  #help-btn { display: none; }
+
+  .gauge { top: max(8px, env(safe-area-inset-top)); bottom: auto; right: max(10px, env(safe-area-inset-right)); width: 104px; height: 104px; }
+  .damage {
+    top: 44px; bottom: auto; left: max(14px, env(safe-area-inset-left)); width: 160px;
+    padding: 6px 10px; gap: 8px; font-size: 10px;
+  }
+
+  .help { padding: 16px 20px; max-height: calc(100dvh - 24px); overflow: auto; }
+  .help h2 { margin-bottom: 10px; }
+  .help dl { gap: 6px 12px; margin-bottom: 12px; font-size: 13px; }
+  .help .paint { margin-bottom: 12px; }
+
+  .touch {
+    display: flex; position: fixed; bottom: max(14px, env(safe-area-inset-bottom)); gap: 12px; align-items: flex-end;
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  }
+  .touch-steer { left: max(18px, env(safe-area-inset-left)); }
+  .touch-pedals { right: max(18px, env(safe-area-inset-right)); }
+  .touch button {
+    width: 78px; height: 78px; border: 0; border-radius: 50%; padding: 0;
+    font-family: inherit; font-weight: 700; font-size: 24px; line-height: 1; color: #f2f2f2; white-space: pre-line;
+    background: rgba(17, 17, 17, 0.55); backdrop-filter: blur(6px);
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35);
+    touch-action: none; -webkit-tap-highlight-color: transparent;
+  }
+  .touch .touch-brake { width: 60px; height: 60px; font-size: 11px; }
+  .touch .touch-down { font-size: 14px; }
+  .touch .touch-up { height: 120px; border-radius: 39px; font-size: 16px; background: rgba(17, 17, 17, 0.7); }
+  .touch button.held { background: rgba(242, 242, 242, 0.85); color: #111; }
+}
+/* Driving needs the phone on its side. */
+@media (hover: none) and (pointer: coarse) and (orientation: portrait) {
+  .rotate {
+    display: grid; place-items: center; position: fixed; inset: 0; z-index: 10; padding: 32px;
+    background: #111; color: #f2f2f2; font-size: 18px; font-weight: 600; text-align: center;
+  }
+}
