@@ -6,12 +6,13 @@ import * as THREE from 'three';
 // meter fills the car smokes, then burns; when it is full the car explodes and
 // throws its panels and wheels across the track. main.js reports wall hits
 // with hit(), calls update() every frame, and reset() puts the car back.
-const MAX_DAMAGE = 100;
+// ricochet() throws sparks where a bullet strikes.
+const MAX_DAMAGE = 250;
 const SAFE_SPEED = 4; // m/s into a wall that leaves no mark
 const DAMAGE_PER_MS = 2.4; // meter points per m/s past SAFE_SPEED
 const GLASS_SPEED = 9; // m/s into a wall that breaks the glass near the hit
-const SMOKE_FROM = 35; // meter points
-const FIRE_FROM = 75;
+const SMOKE_FROM = 90; // meter points
+const FIRE_FROM = 190;
 // In car space: the engine under the rear lid, and the middle of the cabin.
 const ENGINE = new THREE.Vector3(-4.05, 0.72, 0);
 const CABIN = new THREE.Vector3(-2.3, 0.6, 0);
@@ -95,6 +96,13 @@ export function createDamage(scene, { onWreck }) {
     level = Math.min(MAX_DAMAGE, level + (speed - SAFE_SPEED) * DAMAGE_PER_MS);
     meter.set(level / MAX_DAMAGE);
     if (level >= MAX_DAMAGE) explode();
+  }
+
+  // A bullet striking `point` on a surface facing along `normal`: sparks and
+  // a puff of dust bouncing off it.
+  function ricochet(point, normal) {
+    for (let i = 0; i < 10; i++) particles.emit(point, normal.clone().multiplyScalar(3).add(randomDirection().multiplyScalar(3)), SPARK);
+    for (let i = 0; i < 3; i++) particles.emit(point, normal.clone().add(randomDirection().multiplyScalar(0.5)), { ...DUST, size: 0.15 });
   }
 
   // Where the car's body meets the wall: straight back from the wall, or
@@ -304,6 +312,7 @@ export function createDamage(scene, { onWreck }) {
     setCar,
     repaint,
     hit,
+    ricochet,
     update,
     reset,
     get wrecked() {

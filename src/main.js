@@ -14,6 +14,7 @@ import { mute, play } from './sound.js';
 import { createDriveSound } from './drive-sound.js';
 import { createLamps } from './lamps.js';
 import { addTouchControls } from './touch.js';
+import { createGun } from './gun.js';
 
 // Porsche paints offered on the start card, as their swatches look. The car is
 // painted darker, by PAINT_SHADE, because the studio lighting and tone mapping
@@ -103,6 +104,7 @@ const STEER_OUT = THREE.MathUtils.degToRad(180);
 const KEYS = {
   KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down',
   KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', Space: 'brake',
+  KeyF: 'fire',
 };
 // The driver's eyes, in car space, behind the steering wheel.
 const DRIVER_EYE = new THREE.Vector3(-2.62, 0.93, -0.34);
@@ -214,6 +216,7 @@ let lookYaw = 0; // where the driver looks: right of straight ahead,
 let lookPitch = -0.1; // and above level
 let lookDrag = null; // the pointer's last position while it turns the driver's head
 let cluster = null; // the moving gauges on the dashboard
+let gun = null; // the driver's arms and pistol
 
 const functionList = document.getElementById('function-list');
 const help = document.getElementById('help');
@@ -479,6 +482,34 @@ function groundAt(p) {
 }
 const DOWN = new THREE.Vector3(0, -1, 0);
 
+// The first spot on the track along `line`, a ray, or 40 m along it.
+function struck(line) {
+  ray.set(line.origin, line.direction);
+  ray.far = 80;
+  return ray.intersectObjects(solid, false)[0]?.point ?? line.at(40, new THREE.Vector3());
+}
+
+// What the pistol aims at: in the driver's seat, wherever the driver looks
+// out of the window; otherwise nothing, so it rests pointing ahead.
+function aimTarget() {
+  if (!driver) return null;
+  const point = struck(new THREE.Ray(camera.position.clone(), camera.getWorldDirection(new THREE.Vector3())));
+  return gun.canAim(point) ? point : null;
+}
+
+// Fires the pistol at the spot under `screenRay`, a ray from the camera
+// through the pointer, or else at aimTarget(). Sparks fly where it strikes.
+function shoot(screenRay) {
+  if (!gun || !rig || damage.wrecked) return;
+  const shot = gun.fire(screenRay ? struck(screenRay) : aimTarget());
+  if (!shot) return;
+  ray.set(shot.origin, shot.direction);
+  ray.far = 80;
+  const hit = ray.intersectObjects(solid, false)[0];
+  if (hit) damage.ricochet(hit.point, hit.face.normal.clone().transformDirection(hit.object.matrixWorld));
+  gun.streak(shot.origin, hit?.point ?? shot.origin.clone().addScaledVector(shot.direction, 80));
+}
+
 function centerSteering() {
   steerTarget = 0;
   updateFunctionList();
@@ -598,6 +629,10 @@ loader.load(
     cluster = createCluster(car, addDecals(car, (id) => partById[id]?.object));
     damage.setCar({ rig, car, parts });
     lamps.setCar(car, parts);
+    gun = createGun(scene, loader, car);
+    // The driver's window is rolled down, into the door, for the pistol.
+    const pane = car.getObjectByName('door_l_16');
+    pane.position.y -= 0.42 / pane.parent.getWorldScale(new THREE.Vector3()).y;
     buildFunctionList();
     document.getElementById('loading').classList.add('done');
   },
@@ -665,7 +700,9 @@ canvas.addEventListener('pointerup', (e) => {
   }
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
   const part = pick(e);
-  if (part && opener(part)) toggle(opener(part));
+  // From behind the wheel or the chase camera, a click shoots where it points.
+  if (!driver && part && opener(part)) toggle(opener(part));
+  else if (driver || chase) shoot(raycaster.ray.clone());
 });
 
 canvas.addEventListener('pointermove', (e) => {
@@ -691,7 +728,7 @@ canvas.addEventListener('pointermove', (e) => {
   if (e.buttons) return;
   const under = pick(e);
   const part = under && (opener(under) || isWheel(under)) ? under : null;
-  canvas.style.cursor = isWheel(part) ? 'grab' : part ? 'pointer' : 'default';
+  canvas.style.cursor = isWheel(part) ? 'grab' : part ? 'pointer' : driver || chase ? 'crosshair' : 'default';
   if (part === hovered) return;
   const previous = hovered;
   hovered = part;
@@ -791,6 +828,10 @@ renderer.setAnimationLoop(() => {
   updateFunctionList();
   if (chase) gauge.set(velocity.length() * 2.237);
   cluster?.update(dt, { speed, throttle: keys.has('up'), running: !damage.wrecked });
+  if (gun) {
+    if (keys.has('fire')) shoot();
+    gun.update(dt, { target: damage.wrecked ? null : aimTarget() });
+  }
   lamps.update(dt, { night, braking: braking && !damage.wrecked, running: !damage.wrecked });
   driveSound.update({ speed: damage.wrecked ? 0 : velocity.length(), slide: damage.wrecked ? 0 : slide });
 

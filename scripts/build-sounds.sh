@@ -13,6 +13,10 @@
 #   door-open.mp3   a car door's latch and swing
 #   door-close.mp3  the same door shutting
 #
+# and the pistol's:
+#
+#   gunshot.mp3     a .357 Magnum pistol shot
+#
 #   scripts/build-sounds.sh
 #
 # Sources, all CC0 (public domain):
@@ -22,6 +26,7 @@
 #   https://opengameart.org/content/chunky-explosion
 #   https://bigsoundbank.com/screeching-tires-1-s2368.html (Dorian Clair)
 #   https://bigsoundbank.com/car-door-4-s1526.html (Joseph Sardin)
+#   https://bigsoundbank.com/shot-in-357-magnum-9-mm-s0438.html
 set -euo pipefail
 out="$(cd "$(dirname "$0")/.." && pwd)/public/sounds"
 work="$(mktemp -d)"
@@ -34,6 +39,7 @@ curl -sSfL -o glass.wav "$files/glass_breaking.wav"
 curl -sSfL -o explosion.mp3 "$files/Chunky%20Explosion.mp3"
 curl -sSfL -o tires.mp3 https://bigsoundbank.com/UPLOAD/mp3/2368.mp3
 curl -sSfL -o door.mp3 https://bigsoundbank.com/UPLOAD/mp3/1526.mp3
+curl -sSfL -o 0438.mp3 https://bigsoundbank.com/UPLOAD/mp3/0438.mp3
 unzip -q breaking.zip -d breaking
 unzip -q cc100.zip -d cc100
 mkdir -p "$out"
@@ -64,5 +70,7 @@ ffmpeg -v error -y -i tires.mp3 -filter_complex \
 
 render -i door.mp3 -af "atrim=0:1.3,afade=t=out:st=1.1:d=0.2,volume=13dB" "$out/door-open.mp3"
 render -i door.mp3 -af "atrim=3.05:3.85,asetpts=PTS-STARTPTS,afade=t=in:d=0.05,afade=t=out:st=0.6:d=0.2,volume=-1dB" "$out/door-close.mp3"
+
+render -i 0438.mp3 -af "atrim=0:1.4,asetpts=PTS-STARTPTS,afade=t=out:st=1:d=0.4" "$out/gunshot.mp3"
 
 ls -l "$out"

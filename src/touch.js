@@ -6,6 +6,7 @@
 const BUTTONS = [
   { side: 'steer', key: 'left', label: '◀', name: 'Steer left' },
   { side: 'steer', key: 'right', label: '▶', name: 'Steer right' },
+  { side: 'pedals', key: 'fire', label: 'Fire', name: 'Shoot' },
   { side: 'pedals', key: 'brake', label: 'Hand\nbrake', name: 'Handbrake' },
   { side: 'pedals', key: 'down', label: 'Brake', name: 'Brake, then reverse' },
   { side: 'pedals', key: 'up', label: 'Gas', name: 'Accelerate' },

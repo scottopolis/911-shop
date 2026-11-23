@@ -135,6 +135,7 @@ body.night .brand p { color: #9aa3b2; }
     padding: 6px 10px; gap: 8px; font-size: 10px;
   }
 
+  .touch .touch-fire { width: 64px; height: 64px; font-size: 13px; background: rgba(150, 20, 20, 0.7); }
   .help { padding: 16px 20px; max-height: calc(100dvh - 24px); overflow: auto; }
   .help h2 { margin-bottom: 10px; }
   .help dl { gap: 6px 12px; margin-bottom: 12px; font-size: 13px; }
